@@ -287,7 +287,7 @@ RenderHotkeyHeader() {
         fg := DllCall("gdi32\CreateSolidBrush", "uint", HeaderWinColor(Pal["NAVON"]), "ptr")
         font := DllCall("gdi32\CreateFontW", "int", -13, "int", 0, "int", 0, "int", 0,
             "int", 700, "uint", 0, "uint", 0, "uint", 0, "uint", 1,
-            "uint", 0, "uint", 0, "uint", 0, "str", "Segoe UI", "ptr")
+            "uint", 0, "uint", 0, "uint", 0, "uint", 0, "str", "Segoe UI", "ptr")
         if !bg || !fg || !font
             throw Error("Failed to create header brushes/font")
         oldFont := DllCall("gdi32\SelectObject", "ptr", mem, "ptr", font, "ptr")
