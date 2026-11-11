@@ -87,7 +87,7 @@ InitGuiState() {
 ;  GUI construction (rebuilt whenever the theme changes)
 ; ============================================================
 BuildGui(px := "", py := "") {
-    global g, panels, navItems, ddl, edLoops, edSpeed, edUp, edSell, edWin
+    global g, panels, navItems, NavHovered, ddl, edLoops, edSpeed, edUp, edSell, edWin
     global chkTop, statusTxt, recBtn, logBox
     global hkStart, hkStop, hkRecord, keybindStatus, ActionHotkeys
     global headerKeybindPic
@@ -96,6 +96,9 @@ BuildGui(px := "", py := "") {
 
     panels := Map("Main", [], "Settings", [], "Themes", [])
     navItems := Map()
+    ; The hover tracker is only active while the pointer is on a navigation tile.
+    SetTimer NavHoverTick, 0
+    NavHovered := ""
 
     g := Gui("-MaximizeBox -Caption", "PM Macro")
     g.BackColor := Pal["BG"]
@@ -113,8 +116,13 @@ BuildGui(px := "", py := "") {
     navDefs := [["Main", "RUN", 0xE768], ["Settings", "SETTINGS", 0xE713], ["Themes", "THEMES", 0xE790]]
     for i, d in navDefs {
         ny := 70 + (i - 1) * 76
+        ; Active is stronger than hover; hover is a gentle theme-coloured fill.
         bgOn := g.Add("Text", "x10 y" ny " w76 h64 Background" Pal["NAVON"])
+        bgHover := g.Add("Text", "x10 y" ny " w76 h64 Background" Pal["FIELD"])
+        ; A slim vertical accent is visible only when the tile is hovered.
+        hoverBar := g.Add("Text", "x13 y" (ny + 14) " w3 h36 Background" Pal["ACCENT_T"])
         RoundCtrl(bgOn, 30)
+        RoundCtrl(bgHover, 30)
         g.SetFont("s16 Norm c" Pal["MUTED"], "Segoe MDL2 Assets")
         icOff := g.Add("Text", "x10 y" (ny + 8) " w76 h28 Center BackgroundTrans", Chr(d[3]))
         g.SetFont("s7 Bold c" Pal["MUTED"], "Segoe UI")
@@ -123,9 +131,10 @@ BuildGui(px := "", py := "") {
         icOn := g.Add("Text", "x10 y" (ny + 8) " w76 h28 Center BackgroundTrans", Chr(d[3]))
         g.SetFont("s7 Bold c" Pal["ACCENT_T"], "Segoe UI")
         lbOn := g.Add("Text", "x10 y" (ny + 40) " w76 h16 Center BackgroundTrans", d[2])
-        for ctl in [bgOn, icOff, lbOff, icOn, lbOn]
+        ; All visible layers respond to a click, including the hover indicator.
+        for ctl in [bgOn, bgHover, hoverBar, icOff, lbOff, icOn, lbOn]
             ctl.OnEvent("Click", ShowPanel.Bind(d[1]))
-        navItems[d[1]] := [bgOn, icOff, lbOff, icOn, lbOn]
+        navItems[d[1]] := [bgOn, bgHover, hoverBar, icOff, lbOff, icOn, lbOn]
     }
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
@@ -237,8 +246,10 @@ BuildGui(px := "", py := "") {
 
     g.Show("w524 h470" (px != "" ? " x" px " y" py : ""))
     ; Header pill shapes are already painted into the bitmap.
-    for _, navControls in navItems
+    for _, navControls in navItems {
         RoundCtrl(navControls[1], 30)
+        RoundCtrl(navControls[2], 30)
+    }
     logBox.Focus()   ; keeps the dropdown from showing a bright selection
 
     if !win11 {
@@ -411,6 +422,68 @@ DragWindow(wParam, lParam, msg, hwnd) {
         PostMessage 0xA1, 2, , g   ; WM_NCLBUTTONDOWN, HTCAPTION
 }
 
+; Sidebar hover is driven by WM_MOUSEMOVE, not a permanent mouse poll.
+; Only while a tile is hovered do we use a brief timer to detect leaving it.
+NavMouseMove(wParam, lParam, msg, hwnd) {
+    global g
+    if !IsObject(g)
+        return
+    if hwnd != g.Hwnd && DllCall("user32\GetAncestor", "ptr", hwnd, "uint", 2, "ptr") != g.Hwnd
+        return
+    UpdateNavHover()
+}
+
+NavHoverTick() {
+    UpdateNavHover()
+}
+
+NavHitTest() {
+    global navItems
+    MouseGetPos(&mx, &my)
+    bounds := Buffer(16, 0)
+    for name, it in navItems {
+        ; Use the actual Windows rectangle so hover works at any DPI scaling.
+        if !DllCall("user32\GetWindowRect", "ptr", it[1].Hwnd, "ptr", bounds, "int")
+            continue
+        x1 := NumGet(bounds, 0, "int")
+        y1 := NumGet(bounds, 4, "int")
+        x2 := NumGet(bounds, 8, "int")
+        y2 := NumGet(bounds, 12, "int")
+        if mx >= x1 && mx < x2 && my >= y1 && my < y2
+            return name
+    }
+    return ""
+}
+
+UpdateNavHover() {
+    global NavHovered
+    try hovered := NavHitTest()
+    catch
+        return
+    if hovered = NavHovered
+        return
+    NavHovered := hovered
+    SetTimer NavHoverTick, hovered = "" ? 0 : 85
+    PaintNavTiles()
+}
+
+PaintNavTiles() {
+    global navItems, NavHovered, CurPage
+    for name, it in navItems {
+        active := name = CurPage
+        hover := !active && name = NavHovered
+        ; [1] active fill, [2] hover fill, [3] hover accent bar,
+        ; [4-5] muted icon/text, [6-7] bright icon/text.
+        it[1].Visible := active
+        it[2].Visible := hover
+        it[3].Visible := hover
+        it[4].Visible := !active && !hover
+        it[5].Visible := !active && !hover
+        it[6].Visible := active || hover
+        it[7].Visible := active || hover
+    }
+}
+
 ShowPanel(name, *) {
     global CurPage, panels, navItems, g, logBox, hkStart, hkStop, hkRecord
     ; Text-based sidebar items do not take keyboard focus. Move focus away
@@ -427,15 +500,8 @@ ShowPanel(name, *) {
         for ctrl in list
             ctrl.Visible := (pname = name)
     }
-    for nname, it in navItems {
-        on := (nname = name)
-        it[1].Visible := on     ; glowing tile
-        it[2].Visible := !on    ; muted icon + label
-        it[3].Visible := !on
-        it[4].Visible := on     ; accent icon + label
-        it[5].Visible := on
-    }
-    ; Hidden rounded buttons can leave stray corner pixels behind - repaint everything
+    PaintNavTiles()
+    ; Repaint after switching pages; hover updates only toggle the affected tiles.
     DllCall("user32\RedrawWindow", "ptr", g.Hwnd, "ptr", 0, "ptr", 0, "uint", 0x85)
 }
 
