@@ -1,0 +1,41 @@
+name: Publish PhantomMacro v0.3.1 private release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.release-assets/PhantomMacro_Update_v0.3.1.b64'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+
+      - name: Verify update asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .release-assets/PhantomMacro_Update_v0.3.1.b64 > PhantomMacro_Update.zip
+          unzip -t PhantomMacro_Update.zip
+          for file in PhantomMacro.ahk GUI.ahk Macro.ahk UpdateManager.ahk UpdateApply.ahk; do
+            unzip -Z1 PhantomMacro_Update.zip | grep -Fx "$file"
+          done
+          unzip -p PhantomMacro_Update.zip PhantomMacro.ahk | grep -F 'global AppVersion := "0.3.1"'
+
+      - name: Publish private GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create v0.3.1 PhantomMacro_Update.zip \
+            --target "$GITHUB_SHA" \
+            --title "PhantomMacro v0.3.1" \
+            --notes "Private updater release. Includes rounded keybind header and GitHub authentication improvements." \
+            --latest
