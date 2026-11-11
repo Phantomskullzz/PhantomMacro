@@ -1,0 +1,95 @@
+name: Validate and publish private PhantomMacro v0.3.3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-v0.3.3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download AutoHotkey v2 for real syntax and render validation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'autohotkey.zip'
+          Invoke-WebRequest 'https://www.autohotkey.com/download/2.0/AutoHotkey_2.0.31.zip' -OutFile $zip
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'ahk')
+          $exe = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'ahk') -Filter 'AutoHotkey64.exe' -Recurse | Select-Object -First 1
+          if (!$exe) { throw 'AutoHotkey64.exe was not found in downloaded zip.' }
+          $exe.FullName | Set-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt')
+          & $exe.FullName /ErrorStdOut=UTF-8 /Validate (Join-Path $env:GITHUB_WORKSPACE 'PhantomMacro.ahk')
+          if ($LASTEXITCODE -ne 0) { throw 'AutoHotkey syntax validation failed.' }
+
+      - name: Smoke-test GDI header rendering (no Roblox needed)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $smoke = @'
+          #Requires AutoHotkey v2.0
+          global Pal := Map("SIDE", "181015", "NAVON", "34212B", "ACCENT_T", "FF5C77")
+          global ActionHotkeys := Map("start", "F5", "stop", "F8", "record", "F7")
+          try {
+              bitmap := RenderHotkeyHeader()
+              if !bitmap
+                  throw Error("No bitmap returned")
+              DllCall("gdi32\DeleteObject", "ptr", bitmap)
+              ExitApp 0
+          } catch as e {
+              FileAppend e.Message, A_ScriptDir "\render_error.txt"
+              ExitApp 2
+          }
+          #Include GUI.ahk
+          #Include Macro.ahk
+          '@
+          Set-Content -Path '.\render_test.ahk' -Value $smoke -Encoding utf8
+          $exe = Get-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt') -Raw
+          & $exe.Trim() /ErrorStdOut=UTF-8 /Validate '.\render_test.ahk'
+          if ($LASTEXITCODE -ne 0) { throw 'Header test script syntax check failed.' }
+          & $exe.Trim() /ErrorStdOut=UTF-8 '.\render_test.ahk'
+          if ($LASTEXITCODE -ne 0) {
+              if (Test-Path '.\render_error.txt') { Get-Content '.\render_error.txt' }
+              throw 'Header drawing smoke test failed.'
+          }
+
+      - name: Create release ZIP from validated source
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          files = ["PhantomMacro.ahk", "GUI.ahk", "Macro.ahk", "UpdateManager.ahk", "UpdateApply.ahk"]
+          for path in files:
+              assert Path(path).is_file(), path
+          launcher = Path("PhantomMacro.ahk").read_text(encoding="utf-8-sig")
+          gui = Path("GUI.ahk").read_text(encoding="utf-8-sig")
+          assert 'global AppVersion := "0.3.3"' in launcher
+          assert "RenderHotkeyHeader" in gui
+          assert "headerKeybindPic" in gui
+          with ZipFile("PhantomMacro_Update.zip", "w", ZIP_DEFLATED) as z:
+              for path in files:
+                  z.write(path, arcname=path)
+          with ZipFile("PhantomMacro_Update.zip") as z:
+              assert z.testzip() is None
+          '@ | python -
+
+      - name: Publish private GitHub Release v0.3.3
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (gh release view v0.3.3 2>$null) {
+              gh release upload v0.3.3 PhantomMacro_Update.zip --clobber
+          } else {
+              gh release create v0.3.3 PhantomMacro_Update.zip --target $env:GITHUB_SHA --title 'PhantomMacro v0.3.3' --notes 'Rounded keybind badges are now rendered directly as a Windows bitmap; saved bindings, version label and private updater preserved.' --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub private release publication failed.' }
