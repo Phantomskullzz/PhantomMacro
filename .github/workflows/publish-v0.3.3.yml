@@ -58,20 +58,18 @@ jobs:
           '@
           Set-Content -Path '.\render_test.ahk' -Value $smoke -Encoding utf8
           $exe = Get-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt') -Raw
-          $testErr = Join-Path $env:RUNNER_TEMP 'test-validation-stderr.txt'
-          $testOut = Join-Path $env:RUNNER_TEMP 'test-validation-stdout.txt'
-          $check = Start-Process -FilePath $exe.Trim() -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', '.\render_test.ahk') -Wait -PassThru -RedirectStandardError $testErr -RedirectStandardOutput $testOut
-          if (Test-Path $testErr) { Get-Content $testErr | Write-Host }
-          if (Test-Path $testOut) { Get-Content $testOut | Write-Host }
-          if ($check.ExitCode -ne 0) { throw "Header test script validation failed with exit code $($check.ExitCode)." }
           $execErr = Join-Path $env:RUNNER_TEMP 'test-runtime-stderr.txt'
           $execOut = Join-Path $env:RUNNER_TEMP 'test-runtime-stdout.txt'
-          $render = Start-Process -FilePath $exe.Trim() -ArgumentList @('/ErrorStdOut=UTF-8', '.\render_test.ahk') -Wait -PassThru -RedirectStandardError $execErr -RedirectStandardOutput $execOut
-          if (Test-Path $execErr) { Get-Content $execErr | Write-Host }
-          if ($render.ExitCode -ne 0) {
-              if (Test-Path '.\render_error.txt') { Get-Content '.\render_error.txt' }
-              throw 'Header drawing smoke test failed.'
+          $render = Start-Process -FilePath $exe.Trim() -ArgumentList @('/ErrorStdOut=UTF-8', '.\render_test.ahk') -PassThru -RedirectStandardError $execErr -RedirectStandardOutput $execOut
+          if (-not $render.WaitForExit(15000)) {
+              $render.Kill()
+              if (Test-Path $execErr) { Get-Content $execErr | Write-Host }
+              if (Test-Path '.\render_error.txt') { Get-Content '.\render_error.txt' | Write-Host }
+              throw 'Header smoke test timed out. The script may have opened an error dialog.'
           }
+          if (Test-Path $execErr) { Get-Content $execErr | Write-Host }
+          if (Test-Path '.\render_error.txt') { Get-Content '.\render_error.txt' | Write-Host }
+          if ($render.ExitCode -ne 0) { throw "Header renderer failed (exit $($render.ExitCode))." }
 
       - name: Create release ZIP from validated source
         shell: pwsh
