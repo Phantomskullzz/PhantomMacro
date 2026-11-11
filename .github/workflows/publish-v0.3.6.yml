@@ -70,14 +70,23 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $test = @'
           #Requires AutoHotkey v2.0
+          FileAppend "Started
+", "async-status.txt"
           SetTimer (*) => ExitApp(88), -25000
-          StartGitHubCommandAsync("--version", OnVersionResult, 12000)
+          try StartGitHubCommandAsync("--version", OnVersionResult, 12000)
+          catch as e {
+              FileAppend "Launch failed: " e.Message, "async-status.txt"
+              ExitApp 43
+          }
           OnVersionResult(code, output, errors) {
+              FileAppend "Version callback: " code " | " SubStr(output, 1, 100) " | " SubStr(errors, 1, 100) "
+", "async-status.txt"
               if code != 0 || !InStr(output, "gh version")
                   ExitApp 41
               StartGitHubCommandAsync("phantom-invalid-command-12345", OnInvalidCommandResult, 12000)
           }
           OnInvalidCommandResult(code, output, errors) {
+              FileAppend "Invalid callback: " code " | " SubStr(errors, 1, 100), "async-status.txt"
               if code = 0 || errors = ""
                   ExitApp 42
               ExitApp 0
@@ -88,7 +97,15 @@ jobs:
           $exe = (Get-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt') -Raw).Trim()
           $err = Join-Path $env:RUNNER_TEMP 'async-test-stderr.txt'
           $out = Join-Path $env:RUNNER_TEMP 'async-test-stdout.txt'
-          $result = Start-Process -FilePath $exe -ArgumentList @('/ErrorStdOut=UTF-8', '.\async-check.ahk') -Wait -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          $result = Start-Process -FilePath $exe -ArgumentList @('/ErrorStdOut=UTF-8', '.\async-check.ahk') -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          if (-not $result.WaitForExit(35000)) {
+              try { $result.Kill() } catch {}
+              if (Test-Path async-status.txt) { Get-Content async-status.txt | Write-Host }
+              if (Test-Path $err) { Get-Content $err | Write-Host }
+              if (Test-Path $out) { Get-Content $out | Write-Host }
+              throw "Async GitHub CLI smoke test timed out"
+          }
+          if (Test-Path async-status.txt) { Get-Content async-status.txt | Write-Host }
           if (Test-Path $err) { Get-Content $err | Write-Host }
           if (Test-Path $out) { Get-Content $out | Write-Host }
           if ($result.ExitCode -ne 0) { throw "Async GitHub CLI tests failed (AHK exit $($result.ExitCode))." }
