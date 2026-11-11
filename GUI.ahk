@@ -97,7 +97,7 @@ BuildGui(px := "", py := "") {
     panels := Map("Main", [], "Settings", [], "Themes", [])
     navItems := Map()
 
-    g := Gui("-MaximizeBox -Caption", "TD Macro")
+    g := Gui("-MaximizeBox -Caption", "PM Macro")
     g.BackColor := Pal["BG"]
     g.MarginX := 0
     g.MarginY := 0
@@ -106,7 +106,7 @@ BuildGui(px := "", py := "") {
     ; ----- Sidebar (icon above label, glowing tile on the active page) -----
     g.Add("Text", "x0 y0 w96 h470 Background" Pal["SIDE"])
     g.SetFont("s13 Bold c" Pal["ACCENT_T"], "Segoe UI")
-    g.Add("Text", "x0 y21 w96 h25 Center BackgroundTrans", "TD")
+    g.Add("Text", "x0 y21 w96 h25 Center BackgroundTrans", "PM")
     ; The installed version stays visible in every GUI tab.
     g.SetFont("s8 Norm c" Pal["MUTED"], "Segoe UI")
     g.Add("Text", "x0 y46 w96 h15 Center BackgroundTrans", "v" AppVersion)
@@ -131,32 +131,34 @@ BuildGui(px := "", py := "") {
 
     ; Header uses a slim bitmap, leaving a 45+ px gap to the window controls.
     ; Pills are contained within x104..416, below the titlebar's 24px height.
+    ; Continuous top bar matching the sidebar, including the window controls.
+    g.Add("Text", "x96 y0 w428 h24 Background" Pal["SIDE"])
     g.SetFont("s8 Bold c" Pal["ACCENT_T"], "Segoe UI")
     try {
         headerBitmap := RenderHotkeyHeader()
-        headerKeybindPic := g.Add("Picture", "x104 y2 w312 h20", "HBITMAP:" headerBitmap)
+        headerKeybindPic := g.Add("Picture", "x106 y2 w300 h20", "HBITMAP:" headerBitmap)
     } catch {
-        headerKeybindPic := g.Add("Text", "x104 y2 w312 h20 Center +0x200 Background" Pal["SIDE"], "")
+        headerKeybindPic := g.Add("Text", "x106 y2 w300 h20 Center +0x200 Background" Pal["SIDE"], "")
         RefreshHeaderHotkeys()
     }
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
     ; ----- Main: preset, controls, status, log -----
-    ddl := Reg("Main", g.Add("DropDownList", "x120 y24 w300 -Theme Background" Pal["FIELD"] " c" Pal["TEXT"]))
-    Btn("Main", "x430 y24 w70 h24", "Reload", Pal["FIELD"], Pal["TEXT"], LoadList)
+    ddl := Reg("Main", g.Add("DropDownList", "x120 y36 w300 -Theme Background" Pal["FIELD"] " c" Pal["TEXT"]))
+    Btn("Main", "x430 y36 w70 h24", "Reload", Pal["FIELD"], Pal["TEXT"], LoadList)
     g.SetFont("s10 Bold")
-    Btn("Main", "x120 y76 w120 h40", "START", Pal["ACCENT"], Pal["ACCTXT"], StartMacro)
-    Btn("Main", "x250 y76 w120 h40", "STOP", Pal["DANGER"], Pal["DANGERTXT"], StopMacro)
-    recBtn := Btn("Main", "x380 y76 w120 h40", "RECORD", Pal["FIELD"], Pal["TEXT"], ToggleRecord)
+    Btn("Main", "x120 y88 w120 h40", "START", Pal["ACCENT"], Pal["ACCTXT"], StartMacro)
+    Btn("Main", "x250 y88 w120 h40", "STOP", Pal["DANGER"], Pal["DANGERTXT"], StopMacro)
+    recBtn := Btn("Main", "x380 y88 w120 h40", "RECORD", Pal["FIELD"], Pal["TEXT"], ToggleRecord)
     g.SetFont("s10 Norm c" Pal["TEXT"])
-    Label("Main", "x120 y132", "LOOPS  (0 = forever)")
-    edLoops := AddInputField("Main", "x120 y154 w100 h26 Number", ReadSetting("loops", "0"))
-    Label("Main", "x265 y132", "SPEED (1.0 = normal)")
-    edSpeed := AddInputField("Main", "x265 y154 w100 h26", ReadSetting("speed", "1.0"))
-    Label("Main", "x265 y183", "2.0 = faster, 0.5 = slower")
-    statusTxt := Reg("Main", g.Add("Text", "x120 y200 w380 h22 BackgroundTrans c" Pal["ACCENT_T"], "Idle"))
+    Label("Main", "x120 y144", "LOOPS  (0 = forever)")
+    edLoops := AddInputField("Main", "x120 y166 w100 h26 Number", ReadSetting("loops", "0"))
+    Label("Main", "x265 y144", "SPEED (1.0 = normal)")
+    edSpeed := AddInputField("Main", "x265 y166 w100 h26", ReadSetting("speed", "1.0"))
+    Label("Main", "x265 y195", "2.0 = faster, 0.5 = slower")
+    statusTxt := Reg("Main", g.Add("Text", "x120 y212 w380 h22 BackgroundTrans c" Pal["ACCENT_T"], "Idle"))
     g.SetFont("s9 c" Pal["ACCENT_T"], "Consolas")
-    logBox := Reg("Main", g.Add("Edit", "x120 y232 w380 h218 ReadOnly Multi +VScroll -Theme -E0x200 Background" Pal["SIDE"] " c" Pal["ACCENT_T"], LogText))
+    logBox := Reg("Main", g.Add("Edit", "x120 y244 w380 h206 ReadOnly Multi +VScroll -Theme -E0x200 Background" Pal["SIDE"] " c" Pal["ACCENT_T"], LogText))
     SendMessage(0xD3, 3, 10 | (10 << 16), logBox)   ; inner padding left/right
     SendMessage(0x115, 7, 0, logBox)                 ; scroll to bottom
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
@@ -215,9 +217,9 @@ BuildGui(px := "", py := "") {
 
     ; ----- Custom window buttons (the title bar is removed) -----
     g.SetFont("s10 Bold c" Pal["MUTED"])
-    btnMin := g.Add("Text", "x461 y0 w32 h26 +0x200 Center Background" Pal["BG"], "-")
+    btnMin := g.Add("Text", "x461 y0 w32 h26 +0x200 Center Background" Pal["SIDE"], "-")
     btnMin.OnEvent("Click", (*) => g.Minimize())
-    btnClose := g.Add("Text", "x493 y0 w32 h26 +0x200 Center Background" Pal["BG"], "X")
+    btnClose := g.Add("Text", "x493 y0 w32 h26 +0x200 Center Background" Pal["SIDE"], "X")
     btnClose.OnEvent("Click", (*) => (PersistSettings(), ExitApp()))
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
@@ -271,7 +273,7 @@ HeaderWinColor(rgb) {
 
 RenderHotkeyHeader() {
     global ActionHotkeys, Pal
-    width := 312, height := 20
+    width := 300, height := 20
     screen := DllCall("user32\GetDC", "ptr", 0, "ptr")
     if !screen
         throw Error("Unable to get a screen device context")
@@ -301,8 +303,8 @@ RenderHotkeyHeader() {
             HeaderShortcut(ActionHotkeys["stop"]) "  STOP",
             HeaderShortcut(ActionHotkeys["record"]) "  RECORD"]
         for i, label in labels {
-            x := 6 + (i - 1) * 100
-            pillWidth := i = 3 ? 100 : 90
+            x := 4 + (i - 1) * 98
+            pillWidth := i = 3 ? 96 : 88
             rgn := DllCall("gdi32\CreateRoundRectRgn", "int", x, "int", 1,
                 "int", x + pillWidth, "int", 19, "int", 18, "int", 18, "ptr")
             if !rgn
