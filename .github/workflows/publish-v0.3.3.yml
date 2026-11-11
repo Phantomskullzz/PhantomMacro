@@ -41,6 +41,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $smoke = @'
           #Requires AutoHotkey v2.0
+          #ErrorStdOut "UTF-8"
           global Pal := Map("SIDE", "181015", "NAVON", "34212B", "ACCENT_T", "FF5C77")
           global ActionHotkeys := Map("start", "F5", "stop", "F8", "record", "F7")
           try {
@@ -58,6 +59,12 @@ jobs:
           '@
           Set-Content -Path '.\render_test.ahk' -Value $smoke -Encoding utf8
           $exe = Get-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt') -Raw
+          $valErr = Join-Path $env:RUNNER_TEMP 'smoke-validate-stderr.txt'
+          $valOut = Join-Path $env:RUNNER_TEMP 'smoke-validate-stdout.txt'
+          $val = Start-Process -FilePath $exe.Trim() -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', '.\render_test.ahk') -Wait -PassThru -RedirectStandardError $valErr -RedirectStandardOutput $valOut
+          if (Test-Path $valErr) { Get-Content $valErr | Write-Host }
+          if (Test-Path $valOut) { Get-Content $valOut | Write-Host }
+          if ($val.ExitCode -ne 0) { throw "Isolated smoke script syntax failed (exit $($val.ExitCode))." }
           $execErr = Join-Path $env:RUNNER_TEMP 'test-runtime-stderr.txt'
           $execOut = Join-Path $env:RUNNER_TEMP 'test-runtime-stdout.txt'
           $render = Start-Process -FilePath $exe.Trim() -ArgumentList @('/ErrorStdOut=UTF-8', '.\render_test.ahk') -PassThru -RedirectStandardError $execErr -RedirectStandardOutput $execOut
