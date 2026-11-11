@@ -168,6 +168,7 @@ ParseGitHubExitCode(raw) {
 }
 
 PollGitHubCommand(request) {
+    global UpdatingNow
     if !FileExist(request.done) && A_TickCount - request.start < request.timeout
         return
     SetTimer request.poll, 0
@@ -194,10 +195,7 @@ PollGitHubCommand(request) {
             SetUpdateMessage("Private update error")
             UpdateDialogMessage("An unexpected updater error occurred:`n" e.Message, "Icon!")
         }
-        try {
-            global UpdatingNow
-            UpdatingNow := false
-        }
+        UpdatingNow := false
     } finally {
         try DirDelete request.work, true
     }
