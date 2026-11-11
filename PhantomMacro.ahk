@@ -11,7 +11,7 @@ SetMouseDelay -1   ; No artificial delay between recorded pointer positions.
 SetKeyDelay 0, 15  ; Let short legacy key steps register in games.
 
 ; Shared configuration and state used by both modules.
-global AppVersion := "0.3.2"
+global AppVersion := "0.3.3"
 global UpdatingNow := false
 global updateStatusLabel := ""
 global IniFile := A_ScriptDir "\settings.ini"
@@ -38,7 +38,7 @@ global ddl := "", edLoops := "", edSpeed := "", edUp := "", edSell := "", edWin 
 global chkTop := "", statusTxt := "", recBtn := "", logBox := ""
 global hkStart := "", hkStop := "", hkRecord := "", keybindStatus := ""
 ; Read-only shortcut chips shown in the title/header area on every page.
-global topStartBind := "", topStopBind := "", topRecordBind := ""
+global headerKeybindPic := ""
 ; Prevent programmatic resets of hotkey fields from causing a save callback.
 global UpdatingHotkeyFields := false
 ; Live hotkeys and the previously registered shortcuts (both held by the macro module).
