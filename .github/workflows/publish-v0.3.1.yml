@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths:
-      - '.release-assets/PhantomMacro_Update_v0.3.1.b64'
+      - '.github/workflows/publish-v0.3.1.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,25 +18,37 @@ jobs:
       - name: Checkout private repository
         uses: actions/checkout@v4
 
-      - name: Verify update asset
+      - name: Package and validate v0.3.1
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .release-assets/PhantomMacro_Update_v0.3.1.b64 > PhantomMacro_Update.zip
+          python3 - <<'PY'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          from pathlib import Path
+          names = ["PhantomMacro.ahk", "GUI.ahk", "Macro.ahk", "UpdateManager.ahk", "UpdateApply.ahk"]
+          for name in names:
+              assert Path(name).is_file(), f"Missing {name}"
+          launcher = Path("PhantomMacro.ahk").read_text(encoding="utf-8-sig")
+          assert 'global AppVersion := "0.3.1"' in launcher, "Release version mismatch"
+          assert '#Include %A_ScriptDir%\\UpdateManager.ahk' in launcher, "Updater include missing"
+          with ZipFile("PhantomMacro_Update.zip", "w", compression=ZIP_DEFLATED) as z:
+              for name in names:
+                  z.write(name, arcname=name)
+          PY
           unzip -t PhantomMacro_Update.zip
-          for file in PhantomMacro.ahk GUI.ahk Macro.ahk UpdateManager.ahk UpdateApply.ahk; do
-            unzip -Z1 PhantomMacro_Update.zip | grep -Fx "$file"
-          done
-          unzip -p PhantomMacro_Update.zip PhantomMacro.ahk | grep -F 'global AppVersion := "0.3.1"'
 
       - name: Publish private GitHub release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
-          gh release create v0.3.1 PhantomMacro_Update.zip \
-            --target "$GITHUB_SHA" \
-            --title "PhantomMacro v0.3.1" \
-            --notes "Private updater release. Includes rounded keybind header and GitHub authentication improvements." \
-            --latest
+          if gh release view v0.3.1 >/dev/null 2>&1; then
+            gh release upload v0.3.1 PhantomMacro_Update.zip --clobber
+          else
+            gh release create v0.3.1 PhantomMacro_Update.zip \
+              --target "$GITHUB_SHA" \
+              --title "PhantomMacro v0.3.1" \
+              --notes "Private authenticated updater, rounded keybind chips, and safe install/rollback." \
+              --latest
+          fi
