@@ -20,6 +20,8 @@ UpdateDialogMessage(message, options := "Icon!") {
             if WinGetMinMax("ahk_id " g.Hwnd) = -1
                 WinRestore("ahk_id " g.Hwnd)
             WinActivate("ahk_id " g.Hwnd)
+        } catch {
+            ; The owner HWND still keeps the dialog above the GUI if activation fails.
         }
         return MsgBox(message, "PhantomMacro Update", options " Owner" g.Hwnd)
     }
