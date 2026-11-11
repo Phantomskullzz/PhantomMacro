@@ -8,6 +8,24 @@
 ; The released ZIP must be named PhantomMacro_Update.zip and include the
 ; five AHK application files, either at root or inside PhantomMacro/.
 
+
+; Tie update dialogs to the main PhantomMacro window, not the desktop.
+; Owner HWND keeps the prompt above the GUI and makes confirmation modal,
+; including when called from the automatic startup update-check timer.
+UpdateDialogMessage(message, options := "Icon!") {
+    global g
+    if IsObject(g) {
+        g.Opt("+OwnDialogs")
+        try {
+            if WinGetMinMax("ahk_id " g.Hwnd) = -1
+                WinRestore("ahk_id " g.Hwnd)
+            WinActivate("ahk_id " g.Hwnd)
+        }
+        return MsgBox(message, "PhantomMacro Update", options " Owner" g.Hwnd)
+    }
+    return MsgBox(message, "PhantomMacro Update", options)
+}
+
 SetUpdateMessage(message) {
     global updateStatusLabel
     if IsObject(updateStatusLabel)
@@ -90,7 +108,7 @@ CheckForUpdates(quiet := false) {
         return
     if Running || Recording {
         if !quiet
-            MsgBox "Stop playback or recording before checking for updates.", "PhantomMacro", "Icon!"
+            UpdateDialogMessage("Stop playback or recording before checking for updates.", "Icon!")
         return
     }
     UpdatingNow := true
@@ -100,14 +118,13 @@ CheckForUpdates(quiet := false) {
         if VerCompare(latest["version"], AppVersion) <= 0 {
             SetUpdateMessage("v" AppVersion " - up to date (private)")
             if !quiet
-                MsgBox "You're on the latest private release (v" AppVersion ").", "PhantomMacro", "Iconi"
+                UpdateDialogMessage("You're on the latest private release (v" AppVersion ").", "Iconi")
             return
         }
         SetUpdateMessage("Private update v" latest["version"] " available")
         Log("Private GitHub update available: v" latest["version"])
-        answer := MsgBox("PhantomMacro v" latest["version"] " is available in your private GitHub repository."
-            . "`n`nInstall it now?`nYour settings.ini and presets will not be replaced.",
-            "PhantomMacro Update", "YesNo Iconi")
+        answer := UpdateDialogMessage("PhantomMacro v" latest["version"] " is available in your private GitHub repository."
+            . "`n`nInstall it now?`nYour settings.ini and presets will not be replaced.", "YesNo Iconi")
         if answer = "Yes"
             InstallPhantomRelease(latest)
     } catch as e {
@@ -115,7 +132,7 @@ CheckForUpdates(quiet := false) {
         if quiet
             Log("Private update check: " StrReplace(e.Message, "`n", " / "))
         else
-            MsgBox e.Message, "PhantomMacro Update", "Icon!"
+            UpdateDialogMessage(e.Message, "Icon!")
     } finally {
         UpdatingNow := false
     }
