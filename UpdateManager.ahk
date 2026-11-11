@@ -28,6 +28,81 @@ UpdateDialogMessage(message, options := "Icon!") {
     return MsgBox(message, "PhantomMacro Update", options)
 }
 
+
+UpdateNotesPreview(notes) {
+    nl := Chr(13) Chr(10)
+    out := "", count := 0
+    for rawLine in StrSplit(StrReplace(notes, Chr(13)), Chr(10)) {
+        line := Trim(RegExReplace(Trim(rawLine), "^[#*>-]+\s*"))
+        if line = ""
+            continue
+        out .= (count ? nl : "") "• " SubStr(line, 1, 110)
+        count += 1
+        if count >= 5
+            break
+    }
+    return count ? out : "• Private update available." nl "• Existing settings and presets will be preserved."
+}
+
+ShowUpdateAvailableDialog(release) {
+    global g, Pal, AppVersion
+    choice := {install: false}
+    dlg := Gui("+Owner" g.Hwnd " -Caption +Border", "PhantomMacro Update")
+    dlg.BackColor := Pal["BG"]
+    dlg.MarginX := 0
+    dlg.MarginY := 0
+    dlg.SetFont("s10 c" Pal["TEXT"], "Segoe UI")
+    dlg.Add("Text", "x0 y0 w500 h394 Background" Pal["BG"])
+    dlg.Add("Text", "x0 y0 w500 h4 Background" Pal["ACCENT"])
+    dlg.SetFont("s14 Bold c" Pal["ACCENT_T"], "Segoe UI")
+    dlg.Add("Text", "x24 y24 w44 h44 Center +0x200 Background" Pal["NAVON"], "↑")
+    dlg.SetFont("s12 Bold c" Pal["TEXT"], "Segoe UI")
+    dlg.Add("Text", "x82 y24 w365 h30 BackgroundTrans", "Update Available")
+    dlg.SetFont("s8 c" Pal["MUTED"], "Segoe UI")
+    dlg.Add("Text", "x82 y53 w374 h23 BackgroundTrans", "New private PhantomMacro release ready to install")
+    dlg.Add("Text", "x0 y92 w500 h1 Background" Pal["NAVON"])
+    dlg.Add("Text", "x24 y110 w212 h75 Background" Pal["FIELD"])
+    dlg.Add("Text", "x264 y110 w212 h75 Background" Pal["NAVON"])
+    dlg.SetFont("s8 Bold c" Pal["MUTED"], "Segoe UI")
+    dlg.Add("Text", "x38 y119 w150 h18 BackgroundTrans", "CURRENT")
+    dlg.Add("Text", "x278 y119 w150 h18 BackgroundTrans", "NEW")
+    dlg.SetFont("s15 Bold c" Pal["TEXT"], "Segoe UI")
+    dlg.Add("Text", "x38 y141 w172 h29 BackgroundTrans", "v" AppVersion)
+    dlg.SetFont("s15 Bold c" Pal["ACCENT_T"], "Segoe UI")
+    dlg.Add("Text", "x278 y141 w172 h29 BackgroundTrans", "v" release["version"])
+    dlg.SetFont("s11 c" Pal["MUTED"], "Segoe UI")
+    dlg.Add("Text", "x237 y138 w24 h26 Center BackgroundTrans", "→")
+    dlg.SetFont("s8 Bold c" Pal["MUTED"], "Segoe UI")
+    dlg.Add("Text", "x24 y201 w125 h20 BackgroundTrans", "WHAT'S NEW")
+    dlg.Add("Text", "x124 y212 w352 h1 Background" Pal["NAVON"])
+    dlg.SetFont("s9 c" Pal["TEXT"], "Segoe UI")
+    notesBox := dlg.Add("Edit", "x24 y226 w452 h108 ReadOnly Multi -Theme -WantReturn -E0x200 Background" Pal["FIELD"] " c" Pal["TEXT"], UpdateNotesPreview(release["notes"]))
+    DarkTheme(notesBox)
+    dlg.SetFont("s8 c" Pal["MUTED"], "Segoe UI")
+    dlg.Add("Text", "x24 y353 w272 h22 BackgroundTrans", "App restarts automatically after updating.")
+    dlg.SetFont("s9 c" Pal["TEXT"], "Segoe UI")
+    later := dlg.Add("Text", "x298 y346 w80 h34 Center +0x200 Background" Pal["FIELD"] " c" Pal["TEXT"], "Later")
+    install := dlg.Add("Text", "x385 y346 w91 h34 Center +0x200 Background" Pal["ACCENT"] " c" Pal["ACCTXT"], "Install")
+    later.OnEvent("Click", (*) => dlg.Destroy())
+    install.OnEvent("Click", (*) => (choice.install := true, dlg.Destroy()))
+    dlg.OnEvent("Close", (*) => dlg.Destroy())
+    dlg.OnEvent("Escape", (*) => dlg.Destroy())
+    g.Opt("+Disabled")
+    try {
+        WinGetPos(&gx, &gy, &gw, &gh, "ahk_id " g.Hwnd)
+        dlg.Show("w500 h394 x" (gx + Round((gw - 500)/2)) " y" (gy + Round((gh - 394)/2)))
+        RoundCtrl(later, 16)
+        RoundCtrl(install, 16)
+        WinActivate("ahk_id " dlg.Hwnd)
+        WinWaitClose("ahk_id " dlg.Hwnd)
+    } finally {
+        try dlg.Destroy()
+        g.Opt("-Disabled")
+        try WinActivate("ahk_id " g.Hwnd)
+    }
+    return choice.install
+}
+
 SetUpdateMessage(message) {
     global updateStatusLabel
     if IsObject(updateStatusLabel)
