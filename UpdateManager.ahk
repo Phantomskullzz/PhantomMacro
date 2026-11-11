@@ -240,9 +240,29 @@ CheckForUpdates(quiet := false) {
         return
     }
     UpdatingNow := true
+    SetUpdateMessage("Checking private GitHub Releases...")
     try {
-        SetUpdateMessage("Checking private GitHub Releases...")
-        latest := GetLatestPhantomRelease()
+        ; One hidden, nonblocking gh process checks credentials and release data.
+        StartGitHubCommandAsync(
+            'release view --repo "Phantomskullzz/PhantomMacro" --json tagName,body',
+            OnPrivateReleaseCheck.Bind(quiet), 35000)
+    } catch as e {
+        UpdatingNow := false
+        SetUpdateMessage("Private update check unavailable")
+        if quiet
+            Log("Private update check: " e.Message)
+        else
+            UpdateDialogMessage(e.Message, "Icon!")
+    }
+}
+
+OnPrivateReleaseCheck(quiet, code, output, errors) {
+    global UpdatingNow, AppVersion
+    downloading := false
+    try {
+        if code != 0
+            throw Error(GitHubRequestError(code, errors))
+        latest := ReadLatestReleaseJson(output)
         if VerCompare(latest["version"], AppVersion) <= 0 {
             SetUpdateMessage("v" AppVersion " - up to date (private)")
             if !quiet
@@ -251,9 +271,10 @@ CheckForUpdates(quiet := false) {
         }
         SetUpdateMessage("Private update v" latest["version"] " available")
         Log("Private GitHub update available: v" latest["version"])
-        if ShowUpdateAvailableDialog(latest)
+        if ShowUpdateAvailableDialog(latest) {
             InstallPhantomRelease(latest)
-        else
+            downloading := true
+        } else
             SetUpdateMessage("Update postponed: v" latest["version"])
     } catch as e {
         SetUpdateMessage("v" AppVersion " - private update check unavailable")
@@ -262,7 +283,8 @@ CheckForUpdates(quiet := false) {
         else
             UpdateDialogMessage(e.Message, "Icon!")
     } finally {
-        UpdatingNow := false
+        if !downloading
+            UpdatingNow := false
     }
 }
 
