@@ -1,0 +1,58 @@
+name: Publish PhantomMacro v0.3.2 private release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-v0.3.2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+
+      - name: Package and validate v0.3.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          from pathlib import Path
+          files = ["PhantomMacro.ahk", "GUI.ahk", "Macro.ahk", "UpdateManager.ahk", "UpdateApply.ahk"]
+          for file in files:
+              assert Path(file).is_file(), f"Missing {file}"
+          launcher = Path("PhantomMacro.ahk").read_text(encoding="utf-8-sig")
+          gui = Path("GUI.ahk").read_text(encoding="utf-8-sig")
+          assert 'global AppVersion := "0.3.2"' in launcher, "Incorrect release version"
+          assert '#Include %A_ScriptDir%\\UpdateManager.ahk' in launcher, "Missing updater include"
+          assert '"v" AppVersion' in gui, "Visible version is missing"
+          assert 'RoundCtrl(chip, 0)' in gui, "Pill shaping is missing"
+          assert 'GetClientRect' in gui, "Rounded-region sizing is missing"
+          with ZipFile("PhantomMacro_Update.zip", "w", compression=ZIP_DEFLATED) as archive:
+              for file in files:
+                  archive.write(file, arcname=file)
+          PY
+          unzip -t PhantomMacro_Update.zip
+
+      - name: Publish private GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.3.2 >/dev/null 2>&1; then
+            gh release upload v0.3.2 PhantomMacro_Update.zip --clobber
+          else
+            gh release create v0.3.2 PhantomMacro_Update.zip \
+              --target "$GITHUB_SHA" \
+              --title "PhantomMacro v0.3.2" \
+              --notes "Fix pill-shaped Start, Stop and Record header badges; display installed version under TD. Presets, saved settings, and macro logic are unchanged." \
+              --latest
+          fi
