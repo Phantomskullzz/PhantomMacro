@@ -91,6 +91,7 @@ BuildGui(px := "", py := "") {
     global chkTop, statusTxt, recBtn, logBox
     global hkStart, hkStop, hkRecord, keybindStatus, ActionHotkeys
     global topStartBind, topStopBind, topRecordBind
+    global updateStatusLabel, AppVersion
     global Pal, CurPage, ThemeOrder, Themes, CurTheme, WinTitle, PresetDir, LogText
 
     panels := Map("Main", [], "Settings", [], "Themes", [])
@@ -197,6 +198,8 @@ BuildGui(px := "", py := "") {
     Btn("Settings", "x120 y393 w120 h30", "Open folder", Pal["FIELD"], Pal["TEXT"], (*) => Run(PresetDir))
     Btn("Settings", "x250 y393 w120 h30", "Edit preset", Pal["FIELD"], Pal["TEXT"], EditPreset)
     Btn("Settings", "x380 y393 w120 h30", "Pick pixel", Pal["FIELD"], Pal["TEXT"], PickPixel)
+    updateStatusLabel := Reg("Settings", g.Add("Text", "x120 y436 w255 h22 BackgroundTrans c" Pal["MUTED"], "Version v" AppVersion " - private releases"))
+    Btn("Settings", "x380 y430 w120 h30", "Check updates", Pal["FIELD"], Pal["TEXT"], (*) => CheckForUpdates(false))
 
     ; ----- Themes -----
     for i, tname in ThemeOrder {
