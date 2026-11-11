@@ -129,13 +129,14 @@ BuildGui(px := "", py := "") {
     }
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
-    ; Header uses a single bitmap with curved pill backgrounds and labels.
+    ; Header uses a slim bitmap, leaving a 45+ px gap to the window controls.
+    ; Pills are contained within x104..416, below the titlebar's 24px height.
     g.SetFont("s8 Bold c" Pal["ACCENT_T"], "Segoe UI")
     try {
         headerBitmap := RenderHotkeyHeader()
-        headerKeybindPic := g.Add("Picture", "x96 y0 w365 h24", "HBITMAP:" headerBitmap)
+        headerKeybindPic := g.Add("Picture", "x104 y2 w312 h20", "HBITMAP:" headerBitmap)
     } catch {
-        headerKeybindPic := g.Add("Text", "x96 y0 w365 h24 Center +0x200 Background" Pal["SIDE"], "")
+        headerKeybindPic := g.Add("Text", "x104 y2 w312 h20 Center +0x200 Background" Pal["SIDE"], "")
         RefreshHeaderHotkeys()
     }
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
@@ -270,7 +271,7 @@ HeaderWinColor(rgb) {
 
 RenderHotkeyHeader() {
     global ActionHotkeys, Pal
-    width := 365, height := 24
+    width := 312, height := 20
     screen := DllCall("user32\GetDC", "ptr", 0, "ptr")
     if !screen
         throw Error("Unable to get a screen device context")
@@ -300,17 +301,18 @@ RenderHotkeyHeader() {
             HeaderShortcut(ActionHotkeys["stop"]) "  STOP",
             HeaderShortcut(ActionHotkeys["record"]) "  RECORD"]
         for i, label in labels {
-            x := 24 + (i - 1) * 111
+            x := 6 + (i - 1) * 100
+            pillWidth := i = 3 ? 100 : 90
             rgn := DllCall("gdi32\CreateRoundRectRgn", "int", x, "int", 1,
-                "int", x + 100, "int", 23, "int", 22, "int", 22, "ptr")
+                "int", x + pillWidth, "int", 19, "int", 18, "int", 18, "ptr")
             if !rgn
                 throw Error("Failed to create pill region")
             try DllCall("gdi32\FillRgn", "ptr", mem, "ptr", rgn, "ptr", fg)
             finally DllCall("gdi32\DeleteObject", "ptr", rgn)
             textRect := Buffer(16, 0)
-            NumPut("int", x + 3, "int", 1, "int", x + 97, "int", 23, textRect)
+            NumPut("int", x + 3, "int", 1, "int", x + pillWidth - 3, "int", 19, textRect)
             DllCall("user32\DrawTextW", "ptr", mem, "wstr", label, "int", -1,
-                "ptr", textRect, "uint", 0x25, "int")
+                "ptr", textRect, "uint", 0x8825, "int")
         }
         complete := true
         return bmp
