@@ -106,7 +106,10 @@ BuildGui(px := "", py := "") {
     ; ----- Sidebar (icon above label, glowing tile on the active page) -----
     g.Add("Text", "x0 y0 w96 h470 Background" Pal["SIDE"])
     g.SetFont("s13 Bold c" Pal["ACCENT_T"], "Segoe UI")
-    g.Add("Text", "x0 y22 w96 Center BackgroundTrans", "TD")
+    g.Add("Text", "x0 y21 w96 h25 Center BackgroundTrans", "TD")
+    ; The installed version stays visible in every GUI tab.
+    g.SetFont("s8 Norm c" Pal["MUTED"], "Segoe UI")
+    g.Add("Text", "x0 y46 w96 h15 Center BackgroundTrans", "v" AppVersion)
     navDefs := [["Main", "RUN", 0xE768], ["Settings", "SETTINGS", 0xE713], ["Themes", "THEMES", 0xE790]]
     for i, d in navDefs {
         ny := 70 + (i - 1) * 76
@@ -136,10 +139,7 @@ BuildGui(px := "", py := "") {
     topStartBind  := g.Add("Text", "x120 y3 w100 h18 Center +0x200 Background" Pal["NAVON"], "")
     topStopBind   := g.Add("Text", "x231 y3 w100 h18 Center +0x200 Background" Pal["NAVON"], "")
     topRecordBind := g.Add("Text", "x342 y3 w100 h18 Center +0x200 Background" Pal["NAVON"], "")
-    ; The rounded-region parameter is an ellipse DIAMETER. Matching it to the
-    ; chip's 18 px height produces fully pill-shaped left and right ends.
-    for chip in [topStartBind, topStopBind, topRecordBind]
-        RoundCtrl(chip, 18)
+    ; Rounded regions are applied once the GUI is shown and control sizes are final.
     RefreshHeaderHotkeys()
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
@@ -236,6 +236,11 @@ BuildGui(px := "", py := "") {
         DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 33, "int*", 2, "int", 4)       ; round corners
 
     g.Show("w524 h470" (px != "" ? " x" px " y" py : ""))
+    ; Win32 control regions need the *shown* control's final client dimensions.
+    for chip in [topStartBind, topStopBind, topRecordBind]
+        RoundCtrl(chip, 0)  ; 0 = full pill (diameter matches control height)
+    for _, navControls in navItems
+        RoundCtrl(navControls[1], 30)
     logBox.Focus()   ; keeps the dropdown from showing a bright selection
 
     if !win11 {
@@ -296,11 +301,25 @@ AddInputField(p, opts, text := "") {
     return Reg(p, g.Add("Edit", opts " -Theme -E0x200 +Border Background" Pal["FIELD"] " c" Pal["TEXT"], text))
 }
 
-; Clip a control to a rounded rectangle (real pixel size, so it works at any DPI)
+; Apply true rounded regions using a shown control's client dimensions.
+; r = 0 means a full pill; other values are DPI-scaled logical pixels.
 RoundCtrl(ctrl, r := 12) {
-    WinGetPos(, , &w, &h, "ahk_id " ctrl.Hwnd)
-    rgn := DllCall("gdi32\CreateRoundRectRgn", "int", 0, "int", 0, "int", w + 1, "int", h + 1, "int", r, "int", r, "ptr")
-    DllCall("user32\SetWindowRgn", "ptr", ctrl.Hwnd, "ptr", rgn, "int", true)
+    rect := Buffer(16, 0)
+    if !DllCall("user32\\GetClientRect", "ptr", ctrl.Hwnd, "ptr", rect, "int")
+        return false
+    w := NumGet(rect, 8, "int")
+    h := NumGet(rect, 12, "int")
+    if w < 2 || h < 2
+        return false
+    diameter := r = 0 ? h : Min(h, Max(2, Round(r * A_ScreenDPI / 96)))
+    region := DllCall("gdi32\\CreateRoundRectRgn", "int", 0, "int", 0, "int", w, "int", h, "int", diameter, "int", diameter, "ptr")
+    if !region
+        return false
+    if !DllCall("user32\\SetWindowRgn", "ptr", ctrl.Hwnd, "ptr", region, "int", true, "int") {
+        DllCall("gdi32\\DeleteObject", "ptr", region)
+        return false
+    }
+    return true
 }
 
 ; Scrollbar / dropdown styling that matches the theme (dark or light)
