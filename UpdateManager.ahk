@@ -292,58 +292,64 @@ InstallPhantomRelease(latest) {
     global Running, Recording
     if Running || Recording
         throw Error("Stop playback and recording before installing updates.")
-
-    gh := GetGitHubCli()
     work := A_Temp "\PhantomMacro_PrivateUpdate_" A_TickCount
-    unpack := work "\extracted"
-    DirCreate unpack
-    archive := work "\PhantomMacro_Update.zip"
-
-    ; Authenticate again in case the user switched accounts since the check.
-    EnsurePrivateGitHubLogin()
+    DirCreate work
     SetUpdateMessage("Downloading private release v" latest["version"] "...")
-    ; Tag was validated against ^v?NUMBER.NUMBER.NUMBER$.
-    command := '"' gh '" release download "' latest["tag"] '" --repo "Phantomskullzz/PhantomMacro" --pattern "PhantomMacro_Update.zip" --dir "' work '" --clobber'
-    try exitCode := RunWait(command, , "Hide")
-    catch as e
-        throw Error("Could not launch GitHub CLI to download the release: " e.Message)
-    if exitCode != 0
-        throw Error("GitHub CLI could not download the PRIVATE release (exit " exitCode ")."
-            . "`nCheck repository access, the release tag, and that the release has a PhantomMacro_Update.zip asset.")
-    if !FileExist(archive) || FileGetSize(archive) < 1024
-        throw Error("The Release must contain a nonempty PhantomMacro_Update.zip asset.")
-
-    zipped := FileOpen(archive, "r")
-    signature := zipped.ReadUShort()
-    zipped.Close()
-    if signature != 0x4B50
-        throw Error("The downloaded asset is not a ZIP archive.")
-
-    tar := A_WinDir "\System32\tar.exe"
-    if !FileExist(tar)
-        throw Error("Windows tar.exe is required to unpack releases.")
-    rc := RunWait('"' tar '" -xf "' archive '" -C "' unpack '"', , "Hide")
-    if rc != 0
-        throw Error("Could not extract the ZIP (tar exit " rc ").")
-
-    root := FileExist(unpack "\PhantomMacro\PhantomMacro.ahk") ? unpack "\PhantomMacro" : unpack
-    programFiles := ["PhantomMacro.ahk", "GUI.ahk", "Macro.ahk", "UpdateManager.ahk", "UpdateApply.ahk"]
-    for filename in programFiles {
-        if !FileExist(root "\" filename)
-            throw Error("The update ZIP is missing " filename ".")
+    ; The release tag passed a strict vX.Y.Z validator before reaching the shell.
+    args := 'release download "' latest["tag"] '" --repo "Phantomskullzz/PhantomMacro"'
+        . ' --pattern "PhantomMacro_Update.zip" --dir "' work '" --clobber'
+    try StartGitHubCommandAsync(args, FinishPrivateReleaseDownload.Bind(latest, work), 120000)
+    catch as e {
+        try DirDelete work, true
+        throw Error("Could not start the private release download: " e.Message)
     }
-    launcherText := FileRead(root "\PhantomMacro.ahk", "UTF-8")
-    if !RegExMatch(launcherText, 'global AppVersion\s*:=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', &embeddedVersion)
-        throw Error("The downloaded launcher has no AppVersion.")
-    if embeddedVersion[1] != latest["version"]
-        throw Error("The release version and downloaded launcher version do not match.")
+}
 
-    ; Hand off replacement to a separate temporary AHK process, after exiting.
-    helper := work "\UpdateApply.ahk"
-    FileCopy A_ScriptDir "\UpdateApply.ahk", helper, 1
-    PersistSettings()
-    SetUpdateMessage("Applying update and restarting...")
-    currentPid := DllCall("GetCurrentProcessId", "UInt")
-    Run '"' A_AhkPath '" "' helper '" "' root '" "' A_ScriptDir '" "' currentPid '"'
-    ExitApp
+FinishPrivateReleaseDownload(latest, work, code, output, errors) {
+    global UpdatingNow
+    try {
+        if code != 0
+            throw Error("Could not download v" latest["version"] ".`n" GitHubRequestError(code, errors))
+        unpack := work "\extracted"
+        archive := work "\PhantomMacro_Update.zip"
+        if !FileExist(archive) || FileGetSize(archive) < 1024
+            throw Error("The GitHub release is missing PhantomMacro_Update.zip.")
+        zipped := FileOpen(archive, "r")
+        signature := zipped.ReadUShort()
+        zipped.Close()
+        if signature != 0x4B50
+            throw Error("The downloaded asset is not a ZIP archive.")
+        tar := A_WinDir "\System32\tar.exe"
+        if !FileExist(tar)
+            throw Error("Windows tar.exe is required to unpack releases.")
+        DirCreate unpack
+        if RunWait('"' tar '" -xf "' archive '" -C "' unpack '"', , "Hide") != 0
+            throw Error("Could not extract the downloaded ZIP.")
+
+        root := FileExist(unpack "\PhantomMacro\PhantomMacro.ahk") ? unpack "\PhantomMacro" : unpack
+        programFiles := ["PhantomMacro.ahk", "GUI.ahk", "Macro.ahk", "UpdateManager.ahk", "UpdateApply.ahk"]
+        for filename in programFiles {
+            if !FileExist(root "\" filename)
+                throw Error("The update ZIP is missing " filename ".")
+        }
+        launcherText := FileRead(root "\PhantomMacro.ahk", "UTF-8")
+        if !RegExMatch(launcherText, 'global AppVersion\s*:=\s*"([0-9]+\.[0-9]+\.[0-9]+)"', &embeddedVersion)
+            throw Error("The downloaded launcher has no AppVersion.")
+        if embeddedVersion[1] != latest["version"]
+            throw Error("Release tag and downloaded launcher version do not match.")
+
+        helper := work "\UpdateApply.ahk"
+        FileCopy A_ScriptDir "\UpdateApply.ahk", helper, 1
+        PersistSettings()
+        SetUpdateMessage("Applying update and restarting...")
+        currentPid := DllCall("GetCurrentProcessId", "UInt")
+        Run '"' A_AhkPath '" "' helper '" "' root '" "' A_ScriptDir '" "' currentPid '"', , "Hide"
+        ExitApp
+    } catch as e {
+        SetUpdateMessage("Private update failed - please retry")
+        UpdateDialogMessage(e.Message, "Icon!")
+        try DirDelete work, true
+    } finally {
+        UpdatingNow := false
+    }
 }
