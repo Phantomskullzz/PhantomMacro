@@ -11,7 +11,7 @@ SetMouseDelay -1   ; No artificial delay between recorded pointer positions.
 SetKeyDelay 0, 15  ; Let short legacy key steps register in games.
 
 ; Shared configuration and state used by both modules.
-global AppVersion := "0.3.7"
+global AppVersion := "0.3.8"
 global UpdatingNow := false
 global updateStatusLabel := ""
 global IniFile := A_ScriptDir "\settings.ini"
@@ -33,7 +33,7 @@ global PlaybackHeldKeys := Map(), PlaybackHeldButtons := Map()
 ; GUI globals are declared here so that all included functions can share them.
 global Themes := Map(), ThemeOrder := []
 global CurTheme := "", Pal := Map(), CurPage := "Main", LogText := ""
-global g := "", panels := Map(), navItems := Map()
+global g := "", panels := Map(), navItems := Map(), NavHovered := ""
 global ddl := "", edLoops := "", edSpeed := "", edUp := "", edSell := "", edWin := ""
 global chkTop := "", statusTxt := "", recBtn := "", logBox := ""
 global hkStart := "", hkStop := "", hkRecord := "", keybindStatus := ""
@@ -50,6 +50,7 @@ InitGuiState()
 LoadActionHotkeySettings()
 BuildGui()
 OnMessage(0x201, DragWindow)   ; Drag the window using empty space.
+OnMessage(0x200, NavMouseMove)  ; Hover highlights only when the cursor moves over the GUI.
 InitRecorderHotkeys()
 InitActionHotkeys()
 SetTimer (*) => CheckForUpdates(true), -3500
