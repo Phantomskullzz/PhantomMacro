@@ -124,61 +124,110 @@ GetGitHubCli() {
     return "gh.exe"
 }
 
-; Run GitHub CLI using WScript.Shell.Exec (no cmd.exe or shell expansion).
-; Arguments below are either constants or tightly validated release tags.
-; Do not print gh authentication tokens or pass them into command arguments.
-RunGitHubCliCapture(arguments) {
+; Run GitHub CLI hidden and poll a completion marker, never blocking the GUI
+; with StdOut.ReadAll() or exposing a command window.
+StartGitHubCommandAsync(arguments, callback, timeoutMs := 60000) {
     gh := GetGitHubCli()
-    try {
-        process := ComObject("WScript.Shell").Exec('"' gh '" ' arguments)
-        output := process.StdOut.ReadAll()
-        errors := process.StdErr.ReadAll()
-        exitCode := process.ExitCode
-    } catch as e {
-        throw Error("GitHub CLI (gh) was not found or could not start.`n"
-            . "Install it from https://cli.github.com/, then open PowerShell and run:`n"
-            . "gh auth login --web`n`n" e.Message)
-    }
-    if exitCode != 0 {
-        ; Limit output in dialogs, and never request/show gh auth tokens.
-        reason := Trim(errors != "" ? errors : output, " `t`r`n")
-        if StrLen(reason) > 500
-            reason := SubStr(reason, 1, 500) "..."
-        throw Error("GitHub CLI could not complete the request (exit " exitCode ")."
-            . (reason != "" ? "`n" reason : ""))
-    }
-    return Trim(output, " `t`r`n")
-}
+    work := A_Temp "\PhantomMacro_Gh_" A_TickCount "_" Random(1000, 9999)
+    DirCreate work
+    batch := work "\run.cmd"
+    outFile := work "\stdout.txt"
+    errorFile := work "\stderr.txt"
+    doneFile := work "\exitcode.txt"
 
-EnsurePrivateGitHubLogin() {
-    ; Check authentication WITHOUT retrieving or exposing an access token.
+    ; This temporary batch file never includes authentication tokens.
+    ; The caller provides fixed arguments or a strictly validated tag.
+    script := "@echo off" "`r`n"
+        . "chcp 65001 >nul" "`r`n"
+        . '"' gh '" ' arguments ' 1>"' outFile '" 2>"' errorFile '"' "`r`n"
+        . 'set "PM_GH_EXIT=%errorlevel%"' "`r`n"
+        . '> "' doneFile '" echo %PM_GH_EXIT%' "`r`n"
+    FileAppend script, batch, "UTF-8-RAW"
+    request := {work: work, stdout: outFile, stderr: errorFile,
+        done: doneFile, callback: callback, start: A_TickCount,
+        timeout: timeoutMs}
     try {
-        RunGitHubCliCapture("auth status --hostname github.com")
+        ; cmd.exe and gh.exe are launched with a hidden window.
+        Run('"' A_ComSpec '" /D /C "' batch '"', , "Hide")
+        request.poll := PollGitHubCommand.Bind(request)
+        SetTimer request.poll, 125
     } catch as e {
-        throw Error("Private releases need a GitHub login on THIS computer.`n"
-            . "Open PowerShell and run:`n"
-            . "gh auth login --web`n`n"
-            . "Use the GitHub account with access to Phantomskullzz/PhantomMacro.`n`n"
-            . e.Message)
+        try DirDelete work, true
+        throw Error("Unable to launch GitHub CLI silently. " e.Message)
     }
 }
 
-GetLatestPhantomRelease() {
-    EnsurePrivateGitHubLogin()
+PollGitHubCommand(request) {
+    if !FileExist(request.done) && A_TickCount - request.start < request.timeout
+        return
+    SetTimer request.poll, 0
+    code := -1, output := "", errors := ""
     try {
-        ; No explicit tag => latest published release, not a draft.
-        tag := RunGitHubCliCapture('release view --repo "Phantomskullzz/PhantomMacro" --json tagName --jq .tagName')
-        notes := ""
-        try notes := RunGitHubCliCapture('release view --repo "Phantomskullzz/PhantomMacro" --json body --jq .body')
-    } catch as e {
-        throw Error("Cannot read the latest PRIVATE GitHub Release.`n"
-            . "Check that the account has repository access and a published Release exists.`n`n"
-            . e.Message)
+        if FileExist(request.done)
+            code := Integer(Trim(FileRead(request.done, "UTF-8")))
+        else
+            errors := "The private GitHub request timed out."
+        if FileExist(request.stdout)
+            output := FileRead(request.stdout, "UTF-8")
+        if FileExist(request.stderr)
+            errors .= FileRead(request.stderr, "UTF-8")
+        request.callback.Call(code, output, errors)
+    } finally {
+        try DirDelete request.work, true
     }
-    ; Never let release data inject arbitrary command-line arguments.
-    if !RegExMatch(tag, '^v?([0-9]+\.[0-9]+\.[0-9]+)$', &version)
-        throw Error("The release tag must be vX.Y.Z (for example v0.3.1). Got: " tag)
+}
+
+; Decode common JSON escapes from gh release view --json tagName,body.
+UnescapeReleaseJson(value) {
+    out := "", i := 1
+    while i <= StrLen(value) {
+        c := SubStr(value, i, 1)
+        if c = "\" && i < StrLen(value) {
+            n := SubStr(value, i + 1, 1)
+            switch n {
+                case "n": out .= "`n"
+                case "r": out .= "`r"
+                case "t": out .= "`t"
+                case '"': out .= '"'
+                case "u":
+                    hex := SubStr(value, i + 2, 4)
+                    if RegExMatch(hex, "^[0-9A-Fa-f]{4}$") {
+                        out .= Chr(Integer("0x" hex))
+                        i += 6
+                        continue
+                    }
+                    out .= n
+                default: out .= n
+            }
+            i += 2
+        } else {
+            out .= c
+            i += 1
+        }
+    }
+    return out
+}
+
+ReadLatestReleaseJson(output) {
+    if !RegExMatch(output, '"tagName"\s*:\s*"([^"]+)"', &tagMatch)
+        throw Error("GitHub CLI did not return a release tag.")
+    tag := tagMatch[1]
+    if !RegExMatch(tag, "^v?([0-9]+\.[0-9]+\.[0-9]+)$", &version)
+        throw Error("Unexpected release tag: " tag)
+    notes := ""
+    if RegExMatch(output, '"body"\s*:\s*"((?:\\.|[^"\\])*)"', &bodyMatch)
+        notes := UnescapeReleaseJson(bodyMatch[1])
     return Map("version", version[1], "tag", tag, "notes", notes)
+}
+
+GitHubRequestError(code, errors) {
+    reason := Trim(errors, " `t`r`n")
+    if StrLen(reason) > 500
+        reason := SubStr(reason, 1, 500) "..."
+    if code = -1
+        return "Private GitHub request timed out." (reason != "" ? "`n" reason : "")
+    return "GitHub CLI request failed (exit " code ")."
+        . (reason != "" ? "`n" reason : "`nCheck GitHub CLI login and access to Phantomskullzz/PhantomMacro.")
 }
 
 CheckForUpdates(quiet := false) {
