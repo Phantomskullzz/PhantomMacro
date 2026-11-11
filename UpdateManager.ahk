@@ -168,6 +168,8 @@ GetLatestPhantomRelease() {
     try {
         ; No explicit tag => latest published release, not a draft.
         tag := RunGitHubCliCapture('release view --repo "Phantomskullzz/PhantomMacro" --json tagName --jq .tagName')
+        notes := ""
+        try notes := RunGitHubCliCapture('release view --repo "Phantomskullzz/PhantomMacro" --json body --jq .body')
     } catch as e {
         throw Error("Cannot read the latest PRIVATE GitHub Release.`n"
             . "Check that the account has repository access and a published Release exists.`n`n"
@@ -176,7 +178,7 @@ GetLatestPhantomRelease() {
     ; Never let release data inject arbitrary command-line arguments.
     if !RegExMatch(tag, '^v?([0-9]+\.[0-9]+\.[0-9]+)$', &version)
         throw Error("The release tag must be vX.Y.Z (for example v0.3.1). Got: " tag)
-    return Map("version", version[1], "tag", tag)
+    return Map("version", version[1], "tag", tag, "notes", notes)
 }
 
 CheckForUpdates(quiet := false) {
@@ -200,10 +202,10 @@ CheckForUpdates(quiet := false) {
         }
         SetUpdateMessage("Private update v" latest["version"] " available")
         Log("Private GitHub update available: v" latest["version"])
-        answer := UpdateDialogMessage("PhantomMacro v" latest["version"] " is available in your private GitHub repository."
-            . "`n`nInstall it now?`nYour settings.ini and presets will not be replaced.", "YesNo Iconi")
-        if answer = "Yes"
+        if ShowUpdateAvailableDialog(latest)
             InstallPhantomRelease(latest)
+        else
+            SetUpdateMessage("Update postponed: v" latest["version"])
     } catch as e {
         SetUpdateMessage("v" AppVersion " - private update check unavailable")
         if quiet
