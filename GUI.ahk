@@ -252,12 +252,85 @@ BuildGui(px := "", py := "") {
 ; active bindings. Called when the GUI opens, when a hotkey changes, and
 ; after the GUI is rebuilt for a different colour theme.
 RefreshHeaderHotkeys() {
-    global topStartBind, topStopBind, topRecordBind, ActionHotkeys
-    if !IsObject(topStartBind) || !IsObject(topStopBind) || !IsObject(topRecordBind)
+    global headerKeybindPic, ActionHotkeys
+    if !IsObject(headerKeybindPic)
         return
-    topStartBind.Text  := HeaderShortcut(ActionHotkeys["start"]) "  START"
-    topStopBind.Text   := HeaderShortcut(ActionHotkeys["stop"]) "  STOP"
-    topRecordBind.Text := HeaderShortcut(ActionHotkeys["record"]) "  RECORD"
+    if headerKeybindPic.Type = "Pic" {
+        try headerKeybindPic.Value := "HBITMAP:" RenderHotkeyHeader()
+    } else {
+        headerKeybindPic.Text := HeaderShortcut(ActionHotkeys["start"]) "  START   "
+            . HeaderShortcut(ActionHotkeys["stop"]) "  STOP   "
+            . HeaderShortcut(ActionHotkeys["record"]) "  RECORD"
+    }
+}
+
+HeaderWinColor(rgb) {
+    return Integer("0x" SubStr(rgb, 5, 2) SubStr(rgb, 3, 2) SubStr(rgb, 1, 2))
+}
+
+RenderHotkeyHeader() {
+    global ActionHotkeys, Pal
+    width := 365, height := 24
+    screen := DllCall("user32\GetDC", "ptr", 0, "ptr")
+    if !screen
+        throw Error("Unable to get a screen device context")
+    mem := 0, bmp := 0, oldBmp := 0
+    bg := 0, fg := 0, font := 0, oldFont := 0
+    complete := false
+    try {
+        mem := DllCall("gdi32\CreateCompatibleDC", "ptr", screen, "ptr")
+        bmp := DllCall("gdi32\CreateCompatibleBitmap", "ptr", screen, "int", width, "int", height, "ptr")
+        if !mem || !bmp
+            throw Error("Failed to allocate header bitmap")
+        oldBmp := DllCall("gdi32\SelectObject", "ptr", mem, "ptr", bmp, "ptr")
+        bg := DllCall("gdi32\CreateSolidBrush", "uint", HeaderWinColor(Pal["SIDE"]), "ptr")
+        fg := DllCall("gdi32\CreateSolidBrush", "uint", HeaderWinColor(Pal["NAVON"]), "ptr")
+        font := DllCall("gdi32\CreateFontW", "int", -13, "int", 0, "int", 0, "int", 0,
+            "int", 700, "uint", 0, "uint", 0, "uint", 0, "uint", 1,
+            "uint", 0, "uint", 0, "uint", 0, "str", "Segoe UI", "ptr")
+        if !bg || !fg || !font
+            throw Error("Failed to create header brushes/font")
+        oldFont := DllCall("gdi32\SelectObject", "ptr", mem, "ptr", font, "ptr")
+        DllCall("gdi32\SetBkMode", "ptr", mem, "int", 1)
+        DllCall("gdi32\SetTextColor", "ptr", mem, "uint", HeaderWinColor(Pal["ACCENT_T"]))
+        whole := Buffer(16, 0)
+        NumPut("int", 0, "int", 0, "int", width, "int", height, whole)
+        DllCall("user32\FillRect", "ptr", mem, "ptr", whole, "ptr", bg)
+        labels := [HeaderShortcut(ActionHotkeys["start"]) "  START",
+            HeaderShortcut(ActionHotkeys["stop"]) "  STOP",
+            HeaderShortcut(ActionHotkeys["record"]) "  RECORD"]
+        for i, label in labels {
+            x := 24 + (i - 1) * 111
+            rgn := DllCall("gdi32\CreateRoundRectRgn", "int", x, "int", 1,
+                "int", x + 100, "int", 23, "int", 22, "int", 22, "ptr")
+            if !rgn
+                throw Error("Failed to create pill region")
+            try DllCall("gdi32\FillRgn", "ptr", mem, "ptr", rgn, "ptr", fg)
+            finally DllCall("gdi32\DeleteObject", "ptr", rgn)
+            textRect := Buffer(16, 0)
+            NumPut("int", x + 3, "int", 1, "int", x + 97, "int", 23, textRect)
+            DllCall("user32\DrawTextW", "ptr", mem, "wstr", label, "int", -1,
+                "ptr", textRect, "uint", 0x25, "int")
+        }
+        complete := true
+        return bmp
+    } finally {
+        if oldFont
+            DllCall("gdi32\SelectObject", "ptr", mem, "ptr", oldFont)
+        if font
+            DllCall("gdi32\DeleteObject", "ptr", font)
+        if fg
+            DllCall("gdi32\DeleteObject", "ptr", fg)
+        if bg
+            DllCall("gdi32\DeleteObject", "ptr", bg)
+        if oldBmp
+            DllCall("gdi32\SelectObject", "ptr", mem, "ptr", oldBmp)
+        if mem
+            DllCall("gdi32\DeleteDC", "ptr", mem)
+        DllCall("user32\ReleaseDC", "ptr", 0, "ptr", screen)
+        if !complete && bmp
+            DllCall("gdi32\DeleteObject", "ptr", bmp)
+    }
 }
 
 ; Abbreviate long combinations in the compact bar. The Settings fields
