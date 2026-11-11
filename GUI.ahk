@@ -305,18 +305,18 @@ AddInputField(p, opts, text := "") {
 ; r = 0 means a full pill; other values are DPI-scaled logical pixels.
 RoundCtrl(ctrl, r := 12) {
     rect := Buffer(16, 0)
-    if !DllCall("user32\\GetClientRect", "ptr", ctrl.Hwnd, "ptr", rect, "int")
+    if !DllCall("user32\GetClientRect", "ptr", ctrl.Hwnd, "ptr", rect, "int")
         return false
     w := NumGet(rect, 8, "int")
     h := NumGet(rect, 12, "int")
     if w < 2 || h < 2
         return false
     diameter := r = 0 ? h : Min(h, Max(2, Round(r * A_ScreenDPI / 96)))
-    region := DllCall("gdi32\\CreateRoundRectRgn", "int", 0, "int", 0, "int", w, "int", h, "int", diameter, "int", diameter, "ptr")
+    region := DllCall("gdi32\CreateRoundRectRgn", "int", 0, "int", 0, "int", w, "int", h, "int", diameter, "int", diameter, "ptr")
     if !region
         return false
-    if !DllCall("user32\\SetWindowRgn", "ptr", ctrl.Hwnd, "ptr", region, "int", true, "int") {
-        DllCall("gdi32\\DeleteObject", "ptr", region)
+    if !DllCall("user32\SetWindowRgn", "ptr", ctrl.Hwnd, "ptr", region, "int", true, "int") {
+        DllCall("gdi32\DeleteObject", "ptr", region)
         return false
     }
     return true
