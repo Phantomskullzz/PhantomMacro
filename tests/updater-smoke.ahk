@@ -19,7 +19,9 @@ try {
         invalidRejected := true
     CIAssert(invalidRejected, "Invalid completion marker rejected")
 
-    rel := ReadLatestReleaseJson('{"tagName":"v0.3.7","body":"Note`nSecond"}')
+    rel := ReadLatestReleaseJson('{"tagName":"v0.3.7","body":"Note\nSecond\u0041"}')
+    CIAssert(InStr(rel["notes"], Chr(10)) > 0, "Newline JSON decoding")
+    CIAssert(InStr(rel["notes"], "SecondA") > 0, "Unicode JSON decoding")
     CIAssert(rel["version"] = "0.3.7", "Version parsing")
     CIAssert(InStr(rel["notes"], "Note"), "Release notes parsing")
     FileAppend "Parsing passed`n", testLog, "UTF-8"
