@@ -90,7 +90,7 @@ BuildGui(px := "", py := "") {
     global g, panels, navItems, ddl, edLoops, edSpeed, edUp, edSell, edWin
     global chkTop, statusTxt, recBtn, logBox
     global hkStart, hkStop, hkRecord, keybindStatus, ActionHotkeys
-    global topStartBind, topStopBind, topRecordBind
+    global headerKeybindPic
     global updateStatusLabel, AppVersion
     global Pal, CurPage, ThemeOrder, Themes, CurTheme, WinTitle, PresetDir, LogText
 
@@ -129,18 +129,15 @@ BuildGui(px := "", py := "") {
     }
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
-    ; ----- Always-visible header: current Start / Stop / Record shortcuts -----
-    ; These are display-only, not duplicate Hotkey controls. All three are
-    ; always visible on RUN, SETTINGS and THEMES, just like the reference bar.
-    ; Three slim capsule-shaped shortcuts, rather than chunky square tiles.
-    ; Keep them outside the page panels, so they remain visible everywhere.
-    g.Add("Text", "x96 y0 w365 h24 Background" Pal["SIDE"])
+    ; Header uses a single bitmap with curved pill backgrounds and labels.
     g.SetFont("s8 Bold c" Pal["ACCENT_T"], "Segoe UI")
-    topStartBind  := g.Add("Text", "x120 y3 w100 h18 Center +0x200 Background" Pal["NAVON"], "")
-    topStopBind   := g.Add("Text", "x231 y3 w100 h18 Center +0x200 Background" Pal["NAVON"], "")
-    topRecordBind := g.Add("Text", "x342 y3 w100 h18 Center +0x200 Background" Pal["NAVON"], "")
-    ; Rounded regions are applied once the GUI is shown and control sizes are final.
-    RefreshHeaderHotkeys()
+    try {
+        headerBitmap := RenderHotkeyHeader()
+        headerKeybindPic := g.Add("Picture", "x96 y0 w365 h24", "HBITMAP:" headerBitmap)
+    } catch {
+        headerKeybindPic := g.Add("Text", "x96 y0 w365 h24 Center +0x200 Background" Pal["SIDE"], "")
+        RefreshHeaderHotkeys()
+    }
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
     ; ----- Main: preset, controls, status, log -----
@@ -236,9 +233,7 @@ BuildGui(px := "", py := "") {
         DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 33, "int*", 2, "int", 4)       ; round corners
 
     g.Show("w524 h470" (px != "" ? " x" px " y" py : ""))
-    ; Win32 control regions need the *shown* control's final client dimensions.
-    for chip in [topStartBind, topStopBind, topRecordBind]
-        RoundCtrl(chip, 0)  ; 0 = full pill (diameter matches control height)
+    ; Header pill shapes are already painted into the bitmap.
     for _, navControls in navItems
         RoundCtrl(navControls[1], 30)
     logBox.Focus()   ; keeps the dropdown from showing a bright selection
