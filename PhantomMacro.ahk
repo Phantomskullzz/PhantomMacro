@@ -11,6 +11,9 @@ SetMouseDelay -1   ; No artificial delay between recorded pointer positions.
 SetKeyDelay 0, 15  ; Let short legacy key steps register in games.
 
 ; Shared configuration and state used by both modules.
+global AppVersion := "0.3.1"
+global UpdatingNow := false
+global updateStatusLabel := ""
 global IniFile := A_ScriptDir "\settings.ini"
 global PresetDir := A_ScriptDir "\presets"
 global WinTitle := ReadSetting("window", "ahk_exe RobloxPlayerBeta.exe")
@@ -49,8 +52,10 @@ BuildGui()
 OnMessage(0x201, DragWindow)   ; Drag the window using empty space.
 InitRecorderHotkeys()
 InitActionHotkeys()
+SetTimer (*) => CheckForUpdates(true), -3500
 
 ; Include implementation of GUI and macro in this SAME AutoHotkey process.
 ; Use this entrypoint, not GUI.ahk or Macro.ahk.
 #Include %A_ScriptDir%\GUI.ahk
 #Include %A_ScriptDir%\Macro.ahk
+#Include %A_ScriptDir%\UpdateManager.ahk
