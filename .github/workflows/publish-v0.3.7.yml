@@ -95,7 +95,13 @@ jobs:
           $test = Join-Path $env:GITHUB_WORKSPACE 'tests\updater-smoke.ahk'
           $err = Join-Path $env:RUNNER_TEMP 'test-validation-stderr.txt'
           $out = Join-Path $env:RUNNER_TEMP 'test-validation-stdout.txt'
-          $process = Start-Process -FilePath $exe -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', $test) -Wait -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          $process = Start-Process -FilePath $exe -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', $test) -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          if (-not $process.WaitForExit(15000)) {
+              try { $process.Kill() } catch {}
+              if (Test-Path $err) { Get-Content $err | Write-Host }
+              if (Test-Path $out) { Get-Content $out | Write-Host }
+              throw "Regression script syntax check timed out (possible AHK dialog)."
+          }
           if (Test-Path $err) { Get-Content $err | Write-Host }
           if (Test-Path $out) { Get-Content $out | Write-Host }
           if ($process.ExitCode -ne 0) { throw "Regression script failed to parse (exit $($process.ExitCode))" }
