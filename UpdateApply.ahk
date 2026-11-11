@@ -10,7 +10,11 @@ if A_Args.Length != 3 {
 }
 sourceDir := A_Args[1]
 installDir := A_Args[2]
-oldPid := Integer(A_Args[3])
+if !RegExMatch(A_Args[3], "^[0-9]+$") {
+    MsgBox "Updater received an invalid process ID.", "PhantomMacro Update", "Icon!"
+    ExitApp 1
+}
+oldPid := A_Args[3] + 0
 filesToUpdate := ["PhantomMacro.ahk", "GUI.ahk", "Macro.ahk", "UpdateManager.ahk", "UpdateApply.ahk"]
 backupDir := installDir "\update_backups\before_" FormatTime(, "yyyyMMdd_HHmmss") "_" A_TickCount
 replaced := []
@@ -36,8 +40,10 @@ try {
             FileCopy installDir "\" name, backupDir "\" name, 1
     }
     for name in filesToUpdate {
-        FileCopy sourceDir "\" name, installDir "\" name, 1
+        ; Record the target before copying so a partially written file is
+        ; rolled back even if FileCopy itself throws an exception.
         replaced.Push(name)
+        FileCopy sourceDir "\" name, installDir "\" name, 1
     }
     Run '"' A_AhkPath '" "' installDir '\PhantomMacro.ahk"'
 } catch as e {
