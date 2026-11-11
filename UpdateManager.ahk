@@ -157,21 +157,47 @@ StartGitHubCommandAsync(arguments, callback, timeoutMs := 60000) {
     }
 }
 
+; Decode a cmd.exe exit-code file defensively. UTF-8 BOM or control
+; characters have appeared on some PCs, and the timer must not crash.
+ParseGitHubExitCode(raw) {
+    raw := StrReplace(raw, Chr(0xFEFF))
+    raw := Trim(raw, " `t`r`n")
+    if !RegExMatch(raw, "^-?[0-9]+$")
+        throw Error("Unexpected GitHub CLI exit status: " SubStr(raw, 1, 40))
+    return raw + 0  ; Arithmetic conversion yields a real AHK number.
+}
+
 PollGitHubCommand(request) {
     if !FileExist(request.done) && A_TickCount - request.start < request.timeout
         return
     SetTimer request.poll, 0
     code := -1, output := "", errors := ""
     try {
-        if FileExist(request.done)
-            code := Integer(Trim(FileRead(request.done, "UTF-8")))
-        else
+        if FileExist(request.done) {
+            rawCode := FileRead(request.done, "UTF-8")
+            code := ParseGitHubExitCode(rawCode)
+        } else
             errors := "The private GitHub request timed out."
         if FileExist(request.stdout)
             output := FileRead(request.stdout, "UTF-8")
         if FileExist(request.stderr)
             errors .= FileRead(request.stderr, "UTF-8")
+    } catch as e {
+        code := -1
+        errors .= "Cannot read GitHub command result: " e.Message
+    }
+    try {
         request.callback.Call(code, output, errors)
+    } catch as e {
+        ; This function executes on a timer; no exception may escape the timer.
+        try {
+            SetUpdateMessage("Private update error")
+            UpdateDialogMessage("An unexpected updater error occurred:`n" e.Message, "Icon!")
+        }
+        try {
+            global UpdatingNow
+            UpdatingNow := false
+        }
     } finally {
         try DirDelete request.work, true
     }
@@ -192,7 +218,7 @@ UnescapeReleaseJson(value) {
                 case "u":
                     hex := SubStr(value, i + 2, 4)
                     if RegExMatch(hex, "^[0-9A-Fa-f]{4}$") {
-                        out .= Chr(Integer("0x" hex))
+                        out .= Chr(("0x" hex) + 0)
                         i += 6
                         continue
                     }
