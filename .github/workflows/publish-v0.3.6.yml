@@ -70,8 +70,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $test = @'
           #Requires AutoHotkey v2.0
-          FileAppend "Started
-", "async-status.txt"
+          FileAppend "Started.", "async-status.txt"
           SetTimer (*) => ExitApp(88), -25000
           try StartGitHubCommandAsync("--version", OnVersionResult, 12000)
           catch as e {
@@ -79,8 +78,7 @@ jobs:
               ExitApp 43
           }
           OnVersionResult(code, output, errors) {
-              FileAppend "Version callback: " code " | " SubStr(output, 1, 100) " | " SubStr(errors, 1, 100) "
-", "async-status.txt"
+              FileAppend "Version callback: " code " | " SubStr(output, 1, 100) " | " SubStr(errors, 1, 100), "async-status.txt"
               if code != 0 || !InStr(output, "gh version")
                   ExitApp 41
               StartGitHubCommandAsync("phantom-invalid-command-12345", OnInvalidCommandResult, 12000)
