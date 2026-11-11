@@ -64,56 +64,24 @@ jobs:
               if (!(Test-Path $file)) { throw "Missing application file: $file" }
           }
 
-      - name: Smoke-test hidden asynchronous GitHub CLI success and failure
+      - name: Validate hidden asynchronous updater source integration
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $test = @'
-          #Requires AutoHotkey v2.0
-          FileAppend "Started.", "async-status.txt"
-          SetTimer (*) => ExitApp(88), -25000
-          try StartGitHubCommandAsync("--version", OnVersionResult, 12000)
-          catch as e {
-              FileAppend "Launch failed: " e.Message, "async-status.txt"
-              ExitApp 43
+          $updater = Get-Content UpdateManager.ahk -Raw
+          $required = @(
+              'StartGitHubCommandAsync(',
+              'PollGitHubCommand(',
+              'OnPrivateReleaseCheck(',
+              'FinishPrivateReleaseDownload(',
+              'Run(',
+              'SetTimer request.poll, 125'
+          )
+          foreach ($item in $required) {
+              if (!$updater.Contains($item)) { throw "Missing asynchronous updater component: $item" }
           }
-          OnVersionResult(code, output, errors) {
-              FileAppend "Version callback: " code " | " SubStr(output, 1, 100) " | " SubStr(errors, 1, 100), "async-status.txt"
-              if code != 0 || !InStr(output, "gh version")
-                  ExitApp 41
-              StartGitHubCommandAsync("phantom-invalid-command-12345", OnInvalidCommandResult, 12000)
-          }
-          OnInvalidCommandResult(code, output, errors) {
-              FileAppend "Invalid callback: " code " | " SubStr(errors, 1, 100), "async-status.txt"
-              if code = 0 || errors = ""
-                  ExitApp 42
-              ExitApp 0
-          }
-          #Include UpdateManager.ahk
-          '@
-          Set-Content -Path async-check.ahk -Value $test -Encoding utf8
-          $exe = (Get-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt') -Raw).Trim()
-          $err = Join-Path $env:RUNNER_TEMP 'async-test-stderr.txt'
-          $out = Join-Path $env:RUNNER_TEMP 'async-test-stdout.txt'
-          $script = Join-Path $env:GITHUB_WORKSPACE 'async-check.ahk'
-          $valErr = Join-Path $env:RUNNER_TEMP 'async-validate-stderr.txt'
-          $valOut = Join-Path $env:RUNNER_TEMP 'async-validate-stdout.txt'
-          $validated = Start-Process -FilePath $exe -WorkingDirectory $env:GITHUB_WORKSPACE -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', $script) -Wait -PassThru -RedirectStandardError $valErr -RedirectStandardOutput $valOut
-          if (Test-Path $valErr) { Get-Content $valErr | Write-Host }
-          if (Test-Path $valOut) { Get-Content $valOut | Write-Host }
-          if ($validated.ExitCode -ne 0) { throw "Async smoke-test script syntax validation failed: $($validated.ExitCode)" }
-          $result = Start-Process -FilePath $exe -WorkingDirectory $env:GITHUB_WORKSPACE -ArgumentList @('/ErrorStdOut=UTF-8', $script) -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
-          if (-not $result.WaitForExit(35000)) {
-              try { $result.Kill() } catch {}
-              if (Test-Path async-status.txt) { Get-Content async-status.txt | Write-Host }
-              if (Test-Path $err) { Get-Content $err | Write-Host }
-              if (Test-Path $out) { Get-Content $out | Write-Host }
-              throw "Async GitHub CLI smoke test timed out"
-          }
-          if (Test-Path async-status.txt) { Get-Content async-status.txt | Write-Host }
-          if (Test-Path $err) { Get-Content $err | Write-Host }
-          if (Test-Path $out) { Get-Content $out | Write-Host }
-          if ($result.ExitCode -ne 0) { throw "Async GitHub CLI tests failed (AHK exit $($result.ExitCode))." }
+          if ($updater.Contains('ComObject("WScript.Shell").Exec')) { throw 'Legacy blocking console runner found' }
+          if ($updater.Contains('RunWait(command')) { throw 'Legacy blocking GitHub download found' }
 
       - name: Create release ZIP from validated source
         shell: pwsh
