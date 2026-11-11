@@ -11,7 +11,7 @@ SetMouseDelay -1   ; No artificial delay between recorded pointer positions.
 SetKeyDelay 0, 15  ; Let short legacy key steps register in games.
 
 ; Shared configuration and state used by both modules.
-global AppVersion := "0.3.1"
+global AppVersion := "0.3.2"
 global UpdatingNow := false
 global updateStatusLabel := ""
 global IniFile := A_ScriptDir "\settings.ini"
