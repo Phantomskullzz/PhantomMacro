@@ -27,8 +27,13 @@ jobs:
           $exe = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'ahk') -Filter 'AutoHotkey64.exe' -Recurse | Select-Object -First 1
           if (!$exe) { throw 'AutoHotkey64.exe was not found in downloaded zip.' }
           $exe.FullName | Set-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt')
-          & $exe.FullName /ErrorStdOut=UTF-8 /Validate (Join-Path $env:GITHUB_WORKSPACE 'PhantomMacro.ahk')
-          if ($LASTEXITCODE -ne 0) { throw 'AutoHotkey syntax validation failed.' }
+          $err = Join-Path $env:RUNNER_TEMP 'ahk-validation-stderr.txt'
+          $out = Join-Path $env:RUNNER_TEMP 'ahk-validation-stdout.txt'
+          $script = Join-Path $env:GITHUB_WORKSPACE 'PhantomMacro.ahk'
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', $script) -Wait -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          if (Test-Path $err) { Get-Content $err | Write-Host }
+          if (Test-Path $out) { Get-Content $out | Write-Host }
+          if ($process.ExitCode -ne 0) { throw "AHK validation failed with exit code $($process.ExitCode)." }
 
       - name: Smoke-test GDI header rendering (no Roblox needed)
         shell: pwsh
