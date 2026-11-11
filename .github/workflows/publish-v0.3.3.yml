@@ -22,7 +22,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $zip = Join-Path $env:RUNNER_TEMP 'autohotkey.zip'
-          Invoke-WebRequest 'https://www.autohotkey.com/download/2.0/AutoHotkey_2.0.31.zip' -OutFile $zip
+          Invoke-WebRequest 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.31/AutoHotkey_2.0.31.zip' -OutFile $zip
           Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'ahk')
           $exe = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'ahk') -Filter 'AutoHotkey64.exe' -Recurse | Select-Object -First 1
           if (!$exe) { throw 'AutoHotkey64.exe was not found in downloaded zip.' }
