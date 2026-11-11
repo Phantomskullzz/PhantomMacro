@@ -1,0 +1,127 @@
+name: Validate and publish private PhantomMacro v0.3.6
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-v0.3.6.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download AutoHotkey v2 and validate launcher syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'autohotkey.zip'
+          Invoke-WebRequest 'https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.31/AutoHotkey_2.0.31.zip' -OutFile $zip
+          Expand-Archive $zip -DestinationPath (Join-Path $env:RUNNER_TEMP 'ahk')
+          $exe = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'ahk') -Filter 'AutoHotkey64.exe' -Recurse | Select-Object -First 1
+          if (!$exe) { throw 'AutoHotkey64.exe was not found in downloaded zip.' }
+          $exe.FullName | Set-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt')
+          $err = Join-Path $env:RUNNER_TEMP 'ahk-validation-stderr.txt'
+          $out = Join-Path $env:RUNNER_TEMP 'ahk-validation-stdout.txt'
+          $script = Join-Path $env:GITHUB_WORKSPACE 'PhantomMacro.ahk'
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', $script) -Wait -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          if (Test-Path $err) { Get-Content $err | Write-Host }
+          if (Test-Path $out) { Get-Content $out | Write-Host }
+          if ($process.ExitCode -ne 0) { throw "AHK validation failed with exit code $($process.ExitCode)." }
+
+      - name: Verify PM branding, header spacing and themed update modal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gui = Get-Content GUI.ahk -Raw
+          $launcher = Get-Content PhantomMacro.ahk -Raw
+          if (!$gui.Contains('RenderHotkeyHeader()')) { throw 'Rounded header renderer is missing' }
+          if (!$gui.Contains('CreateRoundRectRgn')) { throw 'Rounded GDI fill is missing' }
+          if (!$gui.Contains('headerKeybindPic')) { throw 'Header binding control missing' }
+          if (!$gui.Contains('"x106 y2 w300 h20"')) { throw 'Header layout mismatch' }
+          if (!$gui.Contains('width := 300, height := 20')) { throw 'Header image size does not match control' }
+          if (!$gui.Contains('pillWidth := i = 3 ? 96 : 88')) { throw 'Pill widths are incorrect' }
+          if (!$gui.Contains('"x96 y0 w428 h24 Background"')) { throw 'Full-width dark header is missing' }
+          if (!$gui.Contains('Gui("-MaximizeBox -Caption", "PM Macro")')) { throw 'PM title missing' }
+          if (!$gui.Contains('"x120 y36 w300')) { throw 'Lower macro selection row missing' }
+          $updater = Get-Content UpdateManager.ahk -Raw
+          if (!$updater.Contains('UpdateDialogMessage(')) { throw 'Owned dialogs helper is missing' }
+          if (!$updater.Contains('options " Owner" g.Hwnd')) { throw 'Update prompt is not parented to the main GUI' }
+          if (!$updater.Contains('ShowUpdateAvailableDialog(release)')) { throw 'Custom update popup missing' }
+          if (!$updater.Contains('UpdateNotesPreview(notes)')) { throw 'Release notes preview missing' }
+          if (!$updater.Contains('if ShowUpdateAvailableDialog(latest)')) { throw 'Custom update prompt not called' }
+          if (!$updater.Contains('StartGitHubCommandAsync(')) { throw 'Nonblocking GitHub worker missing' }
+          if (!$updater.Contains('SetTimer request.poll, 125')) { throw 'Asynchronous completion timer missing' }
+          if ($updater.Contains('WScript.Shell").Exec')) { throw 'Legacy visible console runner remains' }
+          if (!$launcher.Contains('global AppVersion := "0.3.6"')) { throw 'Version mismatch' }
+          foreach ($file in @('Macro.ahk','UpdateManager.ahk','UpdateApply.ahk')) {
+              if (!(Test-Path $file)) { throw "Missing application file: $file" }
+          }
+
+      - name: Smoke-test hidden asynchronous GitHub CLI success and failure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $test = @'
+          #Requires AutoHotkey v2.0
+          SetTimer (*) => ExitApp(88), -25000
+          StartGitHubCommandAsync("--version", OnVersionResult, 12000)
+          OnVersionResult(code, output, errors) {
+              if code != 0 || !InStr(output, "gh version")
+                  ExitApp 41
+              StartGitHubCommandAsync("phantom-invalid-command-12345", OnInvalidCommandResult, 12000)
+          }
+          OnInvalidCommandResult(code, output, errors) {
+              if code = 0 || errors = ""
+                  ExitApp 42
+              ExitApp 0
+          }
+          #Include UpdateManager.ahk
+          '@
+          Set-Content -Path async-check.ahk -Value $test -Encoding utf8
+          $exe = (Get-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt') -Raw).Trim()
+          $err = Join-Path $env:RUNNER_TEMP 'async-test-stderr.txt'
+          $out = Join-Path $env:RUNNER_TEMP 'async-test-stdout.txt'
+          $result = Start-Process -FilePath $exe -ArgumentList @('/ErrorStdOut=UTF-8', '.\async-check.ahk') -Wait -PassThru -RedirectStandardError $err -RedirectStandardOutput $out
+          if (Test-Path $err) { Get-Content $err | Write-Host }
+          if (Test-Path $out) { Get-Content $out | Write-Host }
+          if ($result.ExitCode -ne 0) { throw "Async GitHub CLI tests failed (AHK exit $($result.ExitCode))." }
+
+      - name: Create release ZIP from validated source
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          files = ["PhantomMacro.ahk", "GUI.ahk", "Macro.ahk", "UpdateManager.ahk", "UpdateApply.ahk"]
+          for path in files:
+              assert Path(path).is_file(), path
+          launcher = Path("PhantomMacro.ahk").read_text(encoding="utf-8-sig")
+          gui = Path("GUI.ahk").read_text(encoding="utf-8-sig")
+          assert 'global AppVersion := "0.3.6"' in launcher
+          assert "RenderHotkeyHeader" in gui
+          assert "headerKeybindPic" in gui
+          with ZipFile("PhantomMacro_Update.zip", "w", ZIP_DEFLATED) as z:
+              for path in files:
+                  z.write(path, arcname=path)
+          with ZipFile("PhantomMacro_Update.zip") as z:
+              assert z.testzip() is None
+          '@ | python -
+
+      - name: Publish private GitHub Release v0.3.6
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (gh release view v0.3.6 2>$null) {
+              gh release upload v0.3.6 PhantomMacro_Update.zip --clobber
+          } else {
+              gh release create v0.3.6 PhantomMacro_Update.zip --target $env:GITHUB_SHA --title 'PhantomMacro v0.3.6' --notes 'Prevent flashing CMD windows and reduce UI lag by running private GitHub update checks and downloads hidden in the background. Existing settings, presets, themes and macros remain intact.' --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub private release publication failed.' }
