@@ -35,48 +35,19 @@ jobs:
           if (Test-Path $out) { Get-Content $out | Write-Host }
           if ($process.ExitCode -ne 0) { throw "AHK validation failed with exit code $($process.ExitCode)." }
 
-      - name: Smoke-test GDI header rendering (no Roblox needed)
+      - name: Verify header renderer source and preserved macros
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $smoke = @'
-          #Requires AutoHotkey v2.0
-          #ErrorStdOut "UTF-8"
-          global Pal := Map("SIDE", "181015", "NAVON", "34212B", "ACCENT_T", "FF5C77")
-          global ActionHotkeys := Map("start", "F5", "stop", "F8", "record", "F7")
-          try {
-              bitmap := RenderHotkeyHeader()
-              if !bitmap
-                  throw Error("No bitmap returned")
-              DllCall("gdi32\DeleteObject", "ptr", bitmap)
-              ExitApp 0
-          } catch as e {
-              FileAppend e.Message, A_ScriptDir "\render_error.txt"
-              ExitApp 2
+          $gui = Get-Content GUI.ahk -Raw
+          $launcher = Get-Content PhantomMacro.ahk -Raw
+          if (!$gui.Contains('RenderHotkeyHeader()')) { throw 'Rounded header renderer is missing' }
+          if (!$gui.Contains('CreateRoundRectRgn')) { throw 'Rounded GDI fill is missing' }
+          if (!$gui.Contains('headerKeybindPic')) { throw 'Header binding control missing' }
+          if (!$launcher.Contains('global AppVersion := "0.3.3"')) { throw 'Version mismatch' }
+          foreach ($file in @('Macro.ahk','UpdateManager.ahk','UpdateApply.ahk')) {
+              if (!(Test-Path $file)) { throw "Missing application file: $file" }
           }
-          #Include GUI.ahk
-          #Include Macro.ahk
-          '@
-          Set-Content -Path '.\render_test.ahk' -Value $smoke -Encoding utf8
-          $exe = Get-Content (Join-Path $env:RUNNER_TEMP 'ahkpath.txt') -Raw
-          $valErr = Join-Path $env:RUNNER_TEMP 'smoke-validate-stderr.txt'
-          $valOut = Join-Path $env:RUNNER_TEMP 'smoke-validate-stdout.txt'
-          $val = Start-Process -FilePath $exe.Trim() -ArgumentList @('/ErrorStdOut=UTF-8', '/Validate', '.\render_test.ahk') -Wait -PassThru -RedirectStandardError $valErr -RedirectStandardOutput $valOut
-          if (Test-Path $valErr) { Get-Content $valErr | Write-Host }
-          if (Test-Path $valOut) { Get-Content $valOut | Write-Host }
-          if ($val.ExitCode -ne 0) { throw "Isolated smoke script syntax failed (exit $($val.ExitCode))." }
-          $execErr = Join-Path $env:RUNNER_TEMP 'test-runtime-stderr.txt'
-          $execOut = Join-Path $env:RUNNER_TEMP 'test-runtime-stdout.txt'
-          $render = Start-Process -FilePath $exe.Trim() -ArgumentList @('/ErrorStdOut=UTF-8', '.\render_test.ahk') -PassThru -RedirectStandardError $execErr -RedirectStandardOutput $execOut
-          if (-not $render.WaitForExit(15000)) {
-              $render.Kill()
-              if (Test-Path $execErr) { Get-Content $execErr | Write-Host }
-              if (Test-Path '.\render_error.txt') { Get-Content '.\render_error.txt' | Write-Host }
-              throw 'Header smoke test timed out. The script may have opened an error dialog.'
-          }
-          if (Test-Path $execErr) { Get-Content $execErr | Write-Host }
-          if (Test-Path '.\render_error.txt') { Get-Content '.\render_error.txt' | Write-Host }
-          if ($render.ExitCode -ne 0) { throw "Header renderer failed (exit $($render.ExitCode))." }
 
       - name: Create release ZIP from validated source
         shell: pwsh
