@@ -1,4 +1,4 @@
-; Macro.ahk — macro engine, playback, recording and hotkeys.
+﻿; Macro.ahk — macro engine, playback, recording and hotkeys.
 ; Loaded by PhantomMacro.ahk. Do not run this file by itself.
 
 ; This file is included by PhantomMacro.ahk, not started separately.
@@ -15,8 +15,8 @@ if (A_ScriptName = "Macro.ahk") {
 
 InitRecorderHotkeys() {
     global Recording, WinTitle
-    ; Mouse hooks pass the real event through (~); capture only in Roblox.
-    HotIf (*) => Recording && WinActive(WinTitle)
+    ; Mouse hooks pass the real event through (~); capture only in the selected application.
+    HotIf (*) => Recording && WinTitle != "" && WinActive(WinTitle)
     for buttonName in ["LButton", "RButton", "MButton", "XButton1", "XButton2"] {
         Hotkey "~*" buttonName, RecorderMouseButton.Bind(buttonName, "down")
         Hotkey "~*" buttonName " Up", RecorderMouseButton.Bind(buttonName, "up")
@@ -29,18 +29,29 @@ InitRecorderHotkeys() {
 ; ============================================================
 ;  Engine
 ; ============================================================
+; AHK v2 Integer()/Float() reject numeric strings from files/GUI controls.
+; Validate, then coerce through an arithmetic operation instead.
+ParseStepNumber(value) {
+    value := Trim(value)
+    if !RegExMatch(value, "i)^[-+]?(?:0x[0-9a-f]+|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[-+]?[0-9]+)?)$")
+        throw Error("Invalid number in preset/settings: " value)
+    return value + 0
+}
+
 Speed() {
     global edSpeed
     try
-        return Max(0.1, Float(edSpeed.Value))
+        return Max(0.1, ParseStepNumber(edSpeed.Value))
     return 1.0
 }
 
 GetRect() {
     global WinTitle
-    if !WinExist(WinTitle)
-        throw Error("Roblox window not found")
+    if WinTitle = "" || !WinExist(WinTitle)
+        throw Error("Target application not found. Pick an EXE in Settings.")
     WinGetClientPos(&x, &y, &w, &h, WinTitle)
+    if w <= 0 || h <= 0
+        throw Error("The target window has no usable client area.")
     return {x: x, y: y, w: w, h: h}
 }
 
@@ -64,6 +75,8 @@ ClickAt(fx, fy) {
     p := ToScreen(fx, fy)
     MouseMove p.x, p.y, 0
     Nap(60)
+    if !Running
+        return
     Click
     Nap(80)
 }
@@ -94,15 +107,22 @@ LoadPreset(path) {
     return steps
 }
 
+LegacyPresetKey(name, fallback) {
+    ; Backwards compatibility for older handcrafted `upgrade` and `sell`
+    ; steps. Removing the Settings fields must not change recorded behaviour.
+    key := Trim(ReadSetting(name, fallback))
+    return key != "" ? key : fallback
+}
+
 ; Returns false to abort the current run (stop pressed or a wait timed out)
 ExecStep(p) {
-    global Running, edUp, edSell, PlaybackHeldKeys, PlaybackHeldButtons
+    global Running, PlaybackHeldKeys, PlaybackHeldButtons
     cmd := StrLower(p[1])
     switch cmd {
         case "click":                       ; click fx fy
-            ClickAt(Float(p[2]), Float(p[3]))
+            ClickAt(ParseStepNumber(p[2]), ParseStepNumber(p[3]))
         case "move":                        ; move fx fy — recorded pointer path
-            pnt := ToScreen(Float(p[2]), Float(p[3]))
+            pnt := ToScreen(ParseStepNumber(p[2]), ParseStepNumber(p[3]))
             MouseMove pnt.x, pnt.y, 0
         case "mousedown":                   ; mousedown LButton / RButton / ...
             buttonName := p[2]
@@ -127,31 +147,33 @@ ExecStep(p) {
         case "place":                       ; place slot fx fy
             Send "{" p[2] "}"
             Nap(150)
-            ClickAt(Float(p[3]), Float(p[4]))
-        case "upgrade":                     ; upgrade fx fy [times]
-            ClickAt(Float(p[2]), Float(p[3]))
-            Loop (p.Length >= 4 ? Integer(p[4]) : 1) {
+            ClickAt(ParseStepNumber(p[3]), ParseStepNumber(p[4]))
+        case "upgrade":                     ; upgrade fx fy [times] (legacy)
+            upgradeKey := LegacyPresetKey("upkey", "t")
+            ClickAt(ParseStepNumber(p[2]), ParseStepNumber(p[3]))
+            Loop (p.Length >= 4 ? Round(ParseStepNumber(p[4])) : 1) {
                 if !Running
                     return false
-                Send "{" edUp.Value "}"
+                Send "{" upgradeKey "}"
                 Nap(200)
             }
-        case "sell":                        ; sell fx fy
-            ClickAt(Float(p[2]), Float(p[3]))
-            Send "{" edSell.Value "}"
+        case "sell":                        ; sell fx fy (legacy)
+            sellKey := LegacyPresetKey("sellkey", "x")
+            ClickAt(ParseStepNumber(p[2]), ParseStepNumber(p[3]))
+            Send "{" sellKey "}"
             Nap(200)
         case "key":                         ; key k
             Send "{" p[2] "}"
             Nap(100)
         case "wait":                        ; wait ms
-            Nap(Integer(p[2]))
+            Nap(ParseStepNumber(p[2]))
         case "waitpixel":                   ; waitpixel fx fy 0xRRGGBB [timeoutMs] [tolerance]
-            timeout := p.Length >= 5 ? Integer(p[5]) : 60000
-            tol := p.Length >= 6 ? Integer(p[6]) : 20
-            want := Integer(p[4])
+            timeout := p.Length >= 5 ? ParseStepNumber(p[5]) : 60000
+            tol := p.Length >= 6 ? ParseStepNumber(p[6]) : 20
+            want := ParseStepNumber(p[4])
             deadline := A_TickCount + timeout
             while Running {
-                pos := ToScreen(Float(p[2]), Float(p[3]))
+                pos := ToScreen(ParseStepNumber(p[2]), ParseStepNumber(p[3]))
                 if ColorNear(PixelGetColor(pos.x, pos.y), want, tol)
                     return true
                 if A_TickCount > deadline {
@@ -175,12 +197,12 @@ RunSteps(steps) {
         ; Never send recorded keyboard/mouse input into another application.
         if !WinActive(WinTitle) {
             Running := false
-            SetStatus("Stopped: Roblox lost focus")
+            SetStatus("Stopped: target application lost focus")
             return false
         }
         ; High-frequency move/wait pairs should not flood the GUI log.
         verb := StrLower(step[1])
-        if verb != "move" && (verb != "wait" || Integer(step[2]) >= 250)
+        if verb != "move" && (verb != "wait" || ParseStepNumber(step[2]) >= 250)
             Log(Join(step))
         if !ExecStep(step)
             return false
@@ -189,15 +211,23 @@ RunSteps(steps) {
 }
 
 StartMacro(*) {
-    global Running, WinTitle, Recording, ddl, PresetDir, edWin, edLoops
+    global Running, WinTitle, Recording, PickingTarget, ddl, PresetDir, edWin, edLoops
     global PlaybackHeldKeys, PlaybackHeldButtons
+    if PickingTarget {
+        SetStatus("Finish or cancel Pick EXE before playback.")
+        return
+    }
     if Running || Recording
         return
     if ddl.Text = "" {
         SetStatus("Choose or record a preset before starting")
         return
     }
-    WinTitle := edWin.Value
+    WinTitle := Trim(edWin.Value)
+    if WinTitle = "" {
+        SetStatus("Select an application EXE in Settings before starting.")
+        return
+    }
     try {
         steps := LoadPreset(PresetDir "\" ddl.Text ".txt")
         if !steps.Length {
@@ -205,13 +235,13 @@ StartMacro(*) {
             return
         }
         if !WinExist(WinTitle)
-            throw Error("Roblox window not found: " WinTitle)
+            throw Error("Target application not found: " WinTitle)
         ; Launching playback with the START GUI button otherwise sends keys
-        ; to PhantomMacro itself rather than the game.
+        ; to PhantomMacro itself rather than the target app.
         WinActivate WinTitle
         if !WinWaitActive(WinTitle, , 2)
-            throw Error("Could not focus Roblox. Activate the game and retry.")
-        loops := edLoops.Value = "" ? 0 : Integer(edLoops.Value)
+            throw Error("Could not focus the target application. Activate it and retry.")
+        loops := edLoops.Value = "" ? 1 : ParseStepNumber(edLoops.Value)
         PlaybackHeldKeys := Map()
         PlaybackHeldButtons := Map()
         Running := true
@@ -256,7 +286,7 @@ ReleasePlaybackInputs() {
 ; ---------------- Full recorder ----------------
 ; New presets contain: move, mousedown/up, wheel, keydown/up and wait.
 ; Old click/place/key/wait/pixel preset commands remain supported.
-; All cursor coordinates are saved relative to the Roblox client area.
+; All cursor coordinates are saved relative to the target application client area.
 
 AddRecord(line, showInLog := true) {
     global LastTick, RecordLines
@@ -275,7 +305,7 @@ AddRecord(line, showInLog := true) {
 
 RecorderTargetActive() {
     global Recording, WinTitle
-    return Recording && WinActive(WinTitle)
+    return Recording && WinTitle != "" && WinActive(WinTitle)
 }
 
 RecorderSampleMouse(force := false) {
@@ -381,7 +411,7 @@ RecorderOnKeyUp(ih, vk, sc) {
         return
     keyName := RecorderHeldKeys[id]
     RecorderHeldKeys.Delete(id)
-    ; Always release any key pressed in Roblox, even if focus just changed.
+    ; Always release any key pressed in the target application, even if focus just changed.
     AddRecord("keyup " keyName)
 }
 
@@ -423,13 +453,21 @@ RecorderStopCapture() {
 
 ToggleRecord(*) {
     global Recording, RecordLines, LastTick, PendingSlot, WinTitle
-    global Running, edWin, recBtn, Pal, PresetDir, ActionHotkeys, ddl
+    global Running, PickingTarget, edWin, recBtn, Pal, PresetDir, ActionHotkeys, ddl
+    if PickingTarget {
+        SetStatus("Finish or cancel Pick EXE before recording.")
+        return
+    }
     if Running
         return
     if !Recording {
-        WinTitle := edWin.Value
+        WinTitle := Trim(edWin.Value)
+        if WinTitle = "" {
+            SetStatus("Select an application EXE in Settings before recording.")
+            return
+        }
         if !WinExist(WinTitle) {
-            SetStatus("Roblox not found. Check Settings > window target.")
+            SetStatus("Target application not found. Use Pick EXE in Settings.")
             return
         }
         RecordLines := []
@@ -446,15 +484,13 @@ ToggleRecord(*) {
             return
         }
         recBtn.Text := "STOP REC"
-        recBtn.Opt("+Background" Pal["DANGER"])
-        recBtn.Redraw()
-        SetStatus("Recording mouse + keys in Roblox. Press " ShowHotkey(ActionHotkeys["record"]) " to stop.")
+        UiSetButtonBase(recBtn, Pal["DANGER"], Pal["DANGERTXT"])
+        SetStatus("Recording mouse + keys in target app. Press " ShowHotkey(ActionHotkeys["record"]) " to stop.")
     } else {
         Recording := false
         RecorderStopCapture()
         recBtn.Text := "RECORD"
-        recBtn.Opt("+Background" Pal["FIELD"])
-        recBtn.Redraw()
+        UiSetButtonBase(recBtn, Pal["FIELD"], Pal["TEXT"])
         if RecordLines.Length {
             filename := "recorded_" FormatTime(, "yyyyMMdd_HHmmss")
             filepath := PresetDir "\" filename ".txt"
@@ -471,7 +507,7 @@ ToggleRecord(*) {
                 MsgBox "Could not save preset:`n" e.Message, "PhantomMacro", "Icon!"
             }
         } else {
-            SetStatus("No input recorded. Focus Roblox while recording.")
+            SetStatus("No input recorded. Focus the selected application.")
         }
     }
 }

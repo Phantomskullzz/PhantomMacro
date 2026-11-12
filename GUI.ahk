@@ -1,4 +1,4 @@
-; GUI.ahk — visual interface, colour themes, panels and settings.
+﻿; GUI.ahk — visual interface, colour themes, panels and settings.
 ; Loaded by PhantomMacro.ahk. Do not run this file by itself.
 
 ; This file is included by PhantomMacro.ahk, not started separately.
@@ -83,24 +83,62 @@ InitGuiState() {
     LogText := ""
 }
 
+; The .ico is loaded only once, then reused on every theme rebuild.
+; WM_SETICON applies the branded icon to the actual GUI window and taskbar.
+SetMacroWindowIcon(window) {
+    global AppIconPath, AppIconLarge, AppIconSmall
+    if !FileExist(AppIconPath)
+        return
+    try {
+        if !AppIconLarge
+            AppIconLarge := LoadPicture(AppIconPath, "Icon1 w32 h32", &imageType)
+        if !AppIconSmall
+            AppIconSmall := LoadPicture(AppIconPath, "Icon1 w16 h16", &imageType)
+        if AppIconLarge
+            DllCall("user32\SendMessageW", "ptr", window.Hwnd, "uint", 0x80,
+                "uptr", 1, "ptr", AppIconLarge, "ptr")
+        if AppIconSmall
+            DllCall("user32\SendMessageW", "ptr", window.Hwnd, "uint", 0x80,
+                "uptr", 0, "ptr", AppIconSmall, "ptr")
+    } catch {
+        ; A missing or invalid custom icon must never stop the macro GUI.
+    }
+}
+
+ReleaseMacroIcons(exitReason, exitCode) {
+    global AppIconLarge, AppIconSmall
+    if AppIconLarge {
+        DllCall("user32\DestroyIcon", "ptr", AppIconLarge)
+        AppIconLarge := 0
+    }
+    if AppIconSmall {
+        DllCall("user32\DestroyIcon", "ptr", AppIconSmall)
+        AppIconSmall := 0
+    }
+}
+
 ; ============================================================
 ;  GUI construction (rebuilt whenever the theme changes)
 ; ============================================================
 BuildGui(px := "", py := "") {
-    global g, panels, navItems, NavHovered, ddl, edLoops, edSpeed, edUp, edSell, edWin
-    global chkTop, statusTxt, recBtn, logBox
+    global g, panels, navItems, NavHovered, ddl, edLoops, edSpeed, edWin
+    global chkTop, statusTxt, recBtn, logBox, exePickerStatus
     global hkStart, hkStop, hkRecord, keybindStatus, ActionHotkeys
-    global headerKeybindPic
-    global updateStatusLabel, AppVersion
+    global headerKeybindPic, UiHoverButtons, UiHoveredHwnd
+    global AppVersion, AppIconPath
     global Pal, CurPage, ThemeOrder, Themes, CurTheme, WinTitle, PresetDir, LogText
 
     panels := Map("Main", [], "Settings", [], "Themes", [])
     navItems := Map()
     ; The hover tracker is only active while the pointer is on a navigation tile.
     SetTimer NavHoverTick, 0
+    SetTimer UiHoverTick, 0
     NavHovered := ""
+    UiHoverButtons := Map()
+    UiHoveredHwnd := 0
 
     g := Gui("-MaximizeBox -Caption", "PM Macro")
+    SetMacroWindowIcon(g)
     g.BackColor := Pal["BG"]
     g.MarginX := 0
     g.MarginY := 0
@@ -108,33 +146,26 @@ BuildGui(px := "", py := "") {
 
     ; ----- Sidebar (icon above label, glowing tile on the active page) -----
     g.Add("Text", "x0 y0 w96 h470 Background" Pal["SIDE"])
-    g.SetFont("s13 Bold c" Pal["ACCENT_T"], "Segoe UI")
-    g.Add("Text", "x0 y21 w96 h25 Center BackgroundTrans", "PM")
+    if FileExist(AppIconPath) {
+        try g.Add("Picture", "x30 y7 w36 h36", AppIconPath)
+        catch {
+            g.SetFont("s13 Bold c" Pal["ACCENT_T"], "Segoe UI")
+            g.Add("Text", "x0 y21 w96 h25 Center BackgroundTrans", "PM")
+        }
+    } else {
+        g.SetFont("s13 Bold c" Pal["ACCENT_T"], "Segoe UI")
+        g.Add("Text", "x0 y21 w96 h25 Center BackgroundTrans", "PM")
+    }
     ; The installed version stays visible in every GUI tab.
     g.SetFont("s8 Norm c" Pal["MUTED"], "Segoe UI")
     g.Add("Text", "x0 y46 w96 h15 Center BackgroundTrans", "v" AppVersion)
     navDefs := [["Main", "RUN", 0xE768], ["Settings", "SETTINGS", 0xE713], ["Themes", "THEMES", 0xE790]]
     for i, d in navDefs {
         ny := 70 + (i - 1) * 76
-        ; Active is stronger than hover; hover is a gentle theme-coloured fill.
-        bgOn := g.Add("Text", "x10 y" ny " w76 h64 Background" Pal["NAVON"])
-        bgHover := g.Add("Text", "x10 y" ny " w76 h64 Background" Pal["FIELD"])
-        ; A slim vertical accent is visible only when the tile is hovered.
-        hoverBar := g.Add("Text", "x13 y" (ny + 14) " w3 h36 Background" Pal["ACCENT_T"])
-        RoundCtrl(bgOn, 30)
-        RoundCtrl(bgHover, 30)
-        g.SetFont("s16 Norm c" Pal["MUTED"], "Segoe MDL2 Assets")
-        icOff := g.Add("Text", "x10 y" (ny + 8) " w76 h28 Center BackgroundTrans", Chr(d[3]))
-        g.SetFont("s7 Bold c" Pal["MUTED"], "Segoe UI")
-        lbOff := g.Add("Text", "x10 y" (ny + 40) " w76 h16 Center BackgroundTrans", d[2])
-        g.SetFont("s16 Norm c" Pal["ACCENT_T"], "Segoe MDL2 Assets")
-        icOn := g.Add("Text", "x10 y" (ny + 8) " w76 h28 Center BackgroundTrans", Chr(d[3]))
-        g.SetFont("s7 Bold c" Pal["ACCENT_T"], "Segoe UI")
-        lbOn := g.Add("Text", "x10 y" (ny + 40) " w76 h16 Center BackgroundTrans", d[2])
-        ; All visible layers respond to a click, including the hover indicator.
-        for ctl in [bgOn, bgHover, hoverBar, icOff, lbOff, icOn, lbOn]
-            ctl.OnEvent("Click", ShowPanel.Bind(d[1]))
-        navItems[d[1]] := [bgOn, bgHover, hoverBar, icOff, lbOff, icOn, lbOn]
+        tile := g.Add("Picture", "x10 y" ny " w76 h64",
+            "HBITMAP:" RenderNavTile(d[2], d[3], d[1] = CurPage, false))
+        tile.OnEvent("Click", ShowPanel.Bind(d[1]))
+        navItems[d[1]] := {ctrl: tile, label: d[2], glyph: d[3], mode: d[1] = CurPage ? "active" : "idle"}
     }
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
@@ -161,10 +192,11 @@ BuildGui(px := "", py := "") {
     recBtn := Btn("Main", "x380 y88 w120 h40", "RECORD", Pal["FIELD"], Pal["TEXT"], ToggleRecord)
     g.SetFont("s10 Norm c" Pal["TEXT"])
     Label("Main", "x120 y144", "LOOPS  (0 = forever)")
-    edLoops := AddInputField("Main", "x120 y166 w100 h26 Number", ReadSetting("loops", "0"))
+    edLoops := AddInputField("Main", "x120 y166 w100 h26 Number", ReadSetting("loops", "1"))
     Label("Main", "x265 y144", "SPEED (1.0 = normal)")
     edSpeed := AddInputField("Main", "x265 y166 w100 h26", ReadSetting("speed", "1.0"))
     Label("Main", "x265 y195", "2.0 = faster, 0.5 = slower")
+    Btn("Main", "x380 y166 w120 h28", "EXPORT EXE", Pal["FIELD"], Pal["TEXT"], OpenExportDialog)
     statusTxt := Reg("Main", g.Add("Text", "x120 y212 w380 h22 BackgroundTrans c" Pal["ACCENT_T"], "Idle"))
     g.SetFont("s9 c" Pal["ACCENT_T"], "Consolas")
     logBox := Reg("Main", g.Add("Edit", "x120 y244 w380 h206 ReadOnly Multi +VScroll -Theme -E0x200 Background" Pal["SIDE"] " c" Pal["ACCENT_T"], LogText))
@@ -173,63 +205,68 @@ BuildGui(px := "", py := "") {
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
     ; ----- Settings (keys, window, tools) -----
-    Label("Settings", "x120 y44", "UPGRADE KEY")
-    edUp := AddInputField("Settings", "x120 y66 w70 h26 Limit1", ReadSetting("upkey", "t"))
-    Label("Settings", "x220 y44", "SELL KEY")
-    edSell := AddInputField("Settings", "x220 y66 w70 h26 Limit1", ReadSetting("sellkey", "x"))
-    Label("Settings", "x120 y110", "ROBLOX WINDOW TARGET")
-    edWin := AddInputField("Settings", "x120 y132 w380 h26", WinTitle)
+    ; Keep Settings focused on actual user-facing controls. Legacy upgrade/sell
+    ; preset commands still read their last saved INI keys (defaults t/x), but
+    ; the unused per-action editors no longer occupy this screen.
+    Label("Settings", "x120 y44", "TARGET APPLICATION (.EXE)")
+    edWin := AddInputField("Settings", "x120 y66 w268 h26", WinTitle)
+    Btn("Settings", "x398 y66 w102 h26", "Pick EXE", Pal["FIELD"], Pal["TEXT"], StartExePicker)
+    exePickerStatus := Reg("Settings", g.Add("Text", "x120 y94 w380 h18 BackgroundTrans c" Pal["MUTED"],
+        "Press Pick EXE, then right-click the app window."))
     onTop := ReadSetting("ontop", "0") = "1"
-    chkTop := Reg("Settings", g.Add("CheckBox", "x120 y178 -Theme c" Pal["TEXT"] (onTop ? " Checked" : ""), "Keep this window on top"))
+    chkTop := Reg("Settings", g.Add("CheckBox", "x120 y122 -Theme c" Pal["TEXT"] (onTop ? " Checked" : ""), "Keep this window on top"))
     chkTop.OnEvent("Click", (*) => g.Opt(chkTop.Value ? "+AlwaysOnTop" : "-AlwaysOnTop"))
     if onTop
         g.Opt("+AlwaysOnTop")
     ; Hotkey controls display key names and support Ctrl / Alt / Shift combinations.
-    Label("Settings", "x120 y213", "MACRO KEYBINDS  (click a box, then press a key)")
-    Label("Settings", "x120 y241", "START")
-    Label("Settings", "x250 y241", "STOP")
-    Label("Settings", "x380 y241", "RECORD")
-    hkStart := Reg("Settings", g.Add("Hotkey", "x120 y263 w120 h28 -Theme", ActionHotkeys["start"]))
-    hkStop := Reg("Settings", g.Add("Hotkey", "x250 y263 w120 h28 -Theme", ActionHotkeys["stop"]))
-    hkRecord := Reg("Settings", g.Add("Hotkey", "x380 y263 w120 h28 -Theme", ActionHotkeys["record"]))
+    Label("Settings", "x120 y166", "MACRO KEYBINDS  (click a box, then press a key)")
+    Label("Settings", "x120 y194", "START")
+    Label("Settings", "x250 y194", "STOP")
+    Label("Settings", "x380 y194", "RECORD")
+    hkStart := Reg("Settings", g.Add("Hotkey", "x120 y216 w120 h28 -Theme", ActionHotkeys["start"]))
+    hkStop := Reg("Settings", g.Add("Hotkey", "x250 y216 w120 h28 -Theme", ActionHotkeys["stop"]))
+    hkRecord := Reg("Settings", g.Add("Hotkey", "x380 y216 w120 h28 -Theme", ActionHotkeys["record"]))
     ; Save a complete, valid combination as soon as it is entered.
     ; OnEvent automatically handles Ctrl/Alt/Shift + key combinations.
     for bindAction, hotkeyControl in Map("start", hkStart, "stop", hkStop, "record", hkRecord)
         hotkeyControl.OnEvent("Change", HotkeyFieldChanged.Bind(bindAction))
     ; A real Button receives keyboard focus. The old text-only Save surface left
     ; focus in the Hotkey editor, effectively disabling the in-app shortcuts.
-    bSave := Reg("Settings", g.Add("Button", "x120 y309 w134 h32 -Theme", "Save settings"))
-    bSave.OnEvent("Click", SaveSettings)
-    bReset := Reg("Settings", g.Add("Button", "x264 y309 w144 h32 -Theme", "Reset keybinds"))
-    bReset.OnEvent("Click", ResetKeybindFields)
-    keybindStatus := Reg("Settings", g.Add("Text", "x120 y348 w380 h22 BackgroundTrans c" Pal["ACCENT_T"], "Hotkeys active. Changes save automatically."))
+    bSave := Btn("Settings", "x120 y270 w134 h32", "Save settings", Pal["FIELD"], Pal["TEXT"], SaveSettings)
+    bReset := Btn("Settings", "x264 y270 w144 h32", "Reset keybinds", Pal["FIELD"], Pal["TEXT"], ResetKeybindFields)
+    keybindStatus := Reg("Settings", g.Add("Text", "x120 y310 w380 h22 BackgroundTrans c" Pal["ACCENT_T"], "Hotkeys active. Changes save automatically."))
     Label("Settings", "x120 y371", "TOOLS")
     Btn("Settings", "x120 y393 w120 h30", "Open folder", Pal["FIELD"], Pal["TEXT"], (*) => Run(PresetDir))
     Btn("Settings", "x250 y393 w120 h30", "Edit preset", Pal["FIELD"], Pal["TEXT"], EditPreset)
     Btn("Settings", "x380 y393 w120 h30", "Pick pixel", Pal["FIELD"], Pal["TEXT"], PickPixel)
-    updateStatusLabel := Reg("Settings", g.Add("Text", "x120 y436 w255 h22 BackgroundTrans c" Pal["MUTED"], "Version v" AppVersion " - private releases"))
-    Btn("Settings", "x380 y430 w120 h30", "Check updates", Pal["FIELD"], Pal["TEXT"], (*) => CheckForUpdates(false))
+    Reg("Settings", g.Add("Text", "x120 y436 w380 h22 BackgroundTrans c" Pal["MUTED"],
+        "PhantomMacro v" AppVersion "  |  Offline edition - manual ZIP updates"))
 
     ; ----- Themes -----
     for i, tname in ThemeOrder {
         th := Themes[tname]
         cy := 24 + (i - 1) * 46
-        Btn("Themes", "x120 y" cy " w380 h38", "", Pal["FIELD"], Pal["TEXT"], ApplyTheme.Bind(tname))
-        Reg("Themes", g.Add("Text", "x138 y" (cy + 9) " w150 BackgroundTrans c" (tname = CurTheme ? Pal["ACCENT_T"] : Pal["TEXT"]), tname))
-        if tname = CurTheme
-            Reg("Themes", g.Add("Text", "x305 y" (cy + 10) " w120 BackgroundTrans c" Pal["MUTED"], "active"))
+        themeTitle := tname (tname = CurTheme ? "     • ACTIVE" : "")
+        Btn("Themes", "x120 y" cy " w380 h38", themeTitle, Pal["FIELD"],
+            tname = CurTheme ? Pal["ACCENT_T"] : Pal["TEXT"], ApplyTheme.Bind(tname))
         for j, key in ["ACCENT", "BG"] {
             sw := Reg("Themes", g.Add("Text", "x" (445 + (j - 1) * 28) " y" (cy + 9) " w20 h20 Background" th[key]))
             RoundCtrl(sw, 8)
+            sw.OnEvent("Click", ApplyTheme.Bind(tname))
+            UiRegisterHover(sw, th[key], Pal["TEXT"], Pal["ACCENT_T"], Pal["ACCTXT"])
         }
     }
 
     ; ----- Custom window buttons (the title bar is removed) -----
-    g.SetFont("s10 Bold c" Pal["MUTED"])
-    btnMin := g.Add("Text", "x461 y0 w32 h26 +0x200 Center Background" Pal["SIDE"], "-")
+    ; Both window controls share the shortcut-chip row (y2..22). The old
+    ; y0/h26 layout made their glyphs visibly lower than the pill labels.
+    g.SetFont("s9 Bold c" Pal["MUTED"], "Segoe UI")
+    btnMin := g.Add("Text", "x460 y2 w32 h20 +0x200 Center Background" Pal["SIDE"], "−")
     btnMin.OnEvent("Click", (*) => g.Minimize())
-    btnClose := g.Add("Text", "x493 y0 w32 h26 +0x200 Center Background" Pal["SIDE"], "X")
+    UiRegisterHover(btnMin, Pal["SIDE"], Pal["MUTED"], Pal["NAVON"], Pal["ACCENT_T"])
+    btnClose := g.Add("Text", "x492 y2 w32 h20 +0x200 Center Background" Pal["SIDE"], "×")
     btnClose.OnEvent("Click", (*) => (PersistSettings(), ExitApp()))
+    UiRegisterHover(btnClose, Pal["SIDE"], Pal["MUTED"], Pal["DANGER"], Pal["DANGERTXT"])
     g.SetFont("s10 Norm c" Pal["TEXT"], "Segoe UI")
 
     g.OnEvent("Close", (*) => (PersistSettings(), ExitApp()))
@@ -245,11 +282,7 @@ BuildGui(px := "", py := "") {
         DllCall("dwmapi\DwmSetWindowAttribute", "ptr", g.Hwnd, "int", 33, "int*", 2, "int", 4)       ; round corners
 
     g.Show("w524 h470" (px != "" ? " x" px " y" py : ""))
-    ; Header pill shapes are already painted into the bitmap.
-    for _, navControls in navItems {
-        RoundCtrl(navControls[1], 30)
-        RoundCtrl(navControls[2], 30)
-    }
+    ; Sidebar buttons are single bitmaps, not layered clipping regions.
     logBox.Focus()   ; keeps the dropdown from showing a bright selection
 
     if !win11 {
@@ -279,7 +312,7 @@ RefreshHeaderHotkeys() {
 }
 
 HeaderWinColor(rgb) {
-    return Integer("0x" SubStr(rgb, 5, 2) SubStr(rgb, 3, 2) SubStr(rgb, 1, 2))
+    return ("0x" SubStr(rgb, 5, 2) SubStr(rgb, 3, 2) SubStr(rgb, 1, 2)) + 0
 }
 
 RenderHotkeyHeader() {
@@ -372,11 +405,91 @@ Label(p, opts, text) {
 }
 
 Btn(p, opts, text, bg, fg, fn) {
-    global g
+    global g, Pal
     b := g.Add("Text", opts " +0x200 Center Background" bg " c" fg, text)
     b.OnEvent("Click", fn)
     RoundCtrl(b, 20)
+    ; Accent buttons brighten; secondary buttons get an accent text/fill hover.
+    UiRegisterHover(b, bg, fg,
+        bg = Pal["ACCENT"] ? Pal["ACCENT_T"] : Pal["NAVON"],
+        bg = Pal["ACCENT"] ? Pal["ACCTXT"] : Pal["ACCENT_T"])
     return Reg(p, b)
+}
+
+
+; Register every clickable action surface for clear colour-on-hover feedback.
+; Timer runs only while the pointer is on a button and stops on exit.
+UiRegisterHover(ctrl, bg, fg, hoverBg, hoverFg) {
+    global UiHoverButtons
+    UiHoverButtons[ctrl.Hwnd] := {ctrl:ctrl, normalBg:bg, normalFg:fg,
+        hoverBg:hoverBg, hoverFg:hoverFg, hovered:false}
+    return ctrl
+}
+
+UiHoverMouseMove(wParam, lParam, msg, hwnd) {
+    UiUpdateHover()
+}
+
+UiHoverTick() {
+    UiUpdateHover()
+}
+
+UiUpdateHover() {
+    global UiHoverButtons, UiHoveredHwnd
+    if !IsObject(UiHoverButtons) || UiHoverButtons.Count = 0
+        return
+    ; Direct HWND hit-testing avoids repeated GetWindowRect calls on mouse moves.
+    MouseGetPos(&mx, &my, &hoverWindow, &hoverControl, 2)
+    target := 0
+    if UiHoverButtons.Has(hoverControl) {
+        item := UiHoverButtons[hoverControl]
+        try {
+            if item.ctrl.Visible
+                target := hoverControl
+        }
+    }
+    if target = UiHoveredHwnd
+        return
+    if UiHoveredHwnd && UiHoverButtons.Has(UiHoveredHwnd)
+        UiPaintHover(UiHoverButtons[UiHoveredHwnd], false)
+    UiHoveredHwnd := target
+    if target && UiHoverButtons.Has(target)
+        UiPaintHover(UiHoverButtons[target], true)
+    SetTimer UiHoverTick, target ? 85 : 0
+}
+
+UiPaintHover(entry, hovered) {
+    try {
+        entry.ctrl.Opt("Background" (hovered ? entry.hoverBg : entry.normalBg)
+            " c" (hovered ? entry.hoverFg : entry.normalFg))
+        entry.ctrl.Redraw()
+        entry.hovered := hovered
+    }
+}
+
+; When RECORD switches to STOP REC, keep the active state and hover colours in sync.
+UiSetButtonBase(ctrl, bg, fg) {
+    global UiHoverButtons, UiHoveredHwnd, Pal
+    id := ctrl.Hwnd
+    if !UiHoverButtons.Has(id)
+        return
+    item := UiHoverButtons[id]
+    item.normalBg := bg, item.normalFg := fg
+    isStrong := (bg = Pal["ACCENT"] || bg = Pal["DANGER"])
+    item.hoverBg := isStrong ? Pal["ACCENT_T"] : Pal["NAVON"]
+    item.hoverFg := isStrong ? Pal["ACCTXT"] : Pal["ACCENT_T"]
+    UiPaintHover(item, UiHoveredHwnd = id)
+}
+
+UiForgetHover(ctrl) {
+    global UiHoverButtons, UiHoveredHwnd
+    id := ctrl.Hwnd
+    if UiHoverButtons.Has(id)
+        UiHoverButtons.Delete(id)
+    if UiHoveredHwnd = id {
+        UiHoveredHwnd := 0
+        SetTimer UiHoverTick, 0
+    }
 }
 
 AddInputField(p, opts, text := "") {
@@ -422,6 +535,87 @@ DragWindow(wParam, lParam, msg, hwnd) {
         PostMessage 0xA1, 2, , g   ; WM_NCLBUTTONDOWN, HTCAPTION
 }
 
+; One-shot application picker: press Pick EXE, then right-click any running app.
+; During picking, the right-click is consumed so no context menu is opened.
+; Esc, the Pick EXE button, a tab change, or the timeout cancels selection.
+StartExePicker(*) {
+    global PickingTarget, Running, Recording, exePickerStatus
+    if PickingTarget {
+        StopExePicker("Selection cancelled.")
+        return
+    }
+    if Running || Recording {
+        exePickerStatus.Text := "Stop playback or recording before choosing an app."
+        return
+    }
+    PickingTarget := true
+    try {
+        Hotkey "*RButton", CaptureExeRightClick, "On"
+        Hotkey "*Esc", CancelExePicker, "On"
+        SetTimer ExePickerTimedOut, -30000
+        exePickerStatus.Text := "Right-click your app window now. Esc cancels (30s)."
+    } catch as e {
+        StopExePicker("Picker unavailable: " e.Message)
+    }
+}
+
+CaptureExeRightClick(*) {
+    global PickingTarget, g, edWin, WinTitle, exePickerStatus
+    if !PickingTarget
+        return
+    MouseGetPos(, , &hwnd)
+    if !hwnd {
+        exePickerStatus.Text := "No window found. Right-click an open app window."
+        return
+    }
+    ; MouseGetPos can return a child control. Normalize to the top-level app.
+    root := DllCall("user32\GetAncestor", "ptr", hwnd, "uint", 2, "ptr")
+    if root
+        hwnd := root
+    if hwnd = g.Hwnd {
+        exePickerStatus.Text := "Right-click the OTHER application's window."
+        return
+    }
+    try {
+        cls := WinGetClass("ahk_id " hwnd)
+        if cls = "Progman" || cls = "WorkerW" || cls = "Shell_TrayWnd" || cls = "Shell_SecondaryTrayWnd"
+            throw Error("Choose a running app window, not the desktop/taskbar.")
+        exe := WinGetProcessName("ahk_id " hwnd)
+        if !RegExMatch(exe, "i)\.exe$")
+            throw Error("Windows did not return an EXE for that window.")
+        selected := "ahk_exe " exe
+        ; Save before changing the active target so an inaccessible INI cannot
+        ; silently create a target that will be lost after restart.
+        WriteSetting("window", selected)
+        edWin.Value := selected
+        WinTitle := selected
+        StopExePicker()
+        exePickerStatus.Text := "Selected: " exe "  (saved)"
+        Log("Application target set to " exe)
+    } catch as e {
+        exePickerStatus.Text := "Not selected: " SubStr(e.Message, 1, 70)
+    }
+}
+
+StopExePicker(message := "") {
+    global PickingTarget, exePickerStatus
+    PickingTarget := false
+    SetTimer ExePickerTimedOut, 0
+    try Hotkey "*RButton", "Off"
+    try Hotkey "*Esc", "Off"
+    if message != "" && IsObject(exePickerStatus)
+        exePickerStatus.Text := message
+}
+
+CancelExePicker(*) {
+    StopExePicker("Selection cancelled. Press Pick EXE to retry.")
+}
+
+ExePickerTimedOut(*) {
+    if PickingTarget
+        StopExePicker("Selection timed out. Press Pick EXE to retry.")
+}
+
 ; Sidebar hover is driven by WM_MOUSEMOVE, not a permanent mouse poll.
 ; Only while a tile is hovered do we use a brief timer to detect leaving it.
 NavMouseMove(wParam, lParam, msg, hwnd) {
@@ -441,9 +635,8 @@ NavHitTest() {
     global navItems
     MouseGetPos(&mx, &my)
     bounds := Buffer(16, 0)
-    for name, it in navItems {
-        ; Use the actual Windows rectangle so hover works at any DPI scaling.
-        if !DllCall("user32\GetWindowRect", "ptr", it[1].Hwnd, "ptr", bounds, "int")
+    for name, tile in navItems {
+        if !DllCall("user32\GetWindowRect", "ptr", tile.ctrl.Hwnd, "ptr", bounds, "int")
             continue
         x1 := NumGet(bounds, 0, "int")
         y1 := NumGet(bounds, 4, "int")
@@ -469,23 +662,108 @@ UpdateNavHover() {
 
 PaintNavTiles() {
     global navItems, NavHovered, CurPage
-    for name, it in navItems {
+    for name, tile in navItems {
         active := name = CurPage
-        hover := !active && name = NavHovered
-        ; [1] active fill, [2] hover fill, [3] hover accent bar,
-        ; [4-5] muted icon/text, [6-7] bright icon/text.
-        it[1].Visible := active
-        it[2].Visible := hover
-        it[3].Visible := hover
-        it[4].Visible := !active && !hover
-        it[5].Visible := !active && !hover
-        it[6].Visible := active || hover
-        it[7].Visible := active || hover
+        hovered := name = NavHovered
+        mode := active ? (hovered ? "active-hover" : "active") : (hovered ? "hover" : "idle")
+        if mode = tile.mode
+            continue
+        ; A single picture replaces layered, clipped text windows that left
+        ; dark triangles in the rounded sidebar buttons after hover changes.
+        try tile.ctrl.Value := "HBITMAP:" RenderNavTile(tile.label, tile.glyph,
+            active, hovered)
+        tile.mode := mode
+    }
+}
+
+; Draw a complete tile into one opaque bitmap. No overlapping controls,
+; transparent regions or corner-pixel remnants when switching hover state.
+RenderNavTile(label, glyph, active, hovered) {
+    global Pal
+    w := 76, h := 64
+    screen := DllCall("user32\GetDC", "ptr", 0, "ptr")
+    if !screen
+        throw Error("Cannot create sidebar bitmap")
+    mem := 0, bmp := 0, oldBmp := 0, brush := 0
+    font := 0, oldFont := 0, rgn := 0
+    success := false
+    try {
+        mem := DllCall("gdi32\CreateCompatibleDC", "ptr", screen, "ptr")
+        bmp := DllCall("gdi32\CreateCompatibleBitmap", "ptr", screen, "int", w, "int", h, "ptr")
+        if !mem || !bmp
+            throw Error("Cannot allocate sidebar tile")
+        oldBmp := DllCall("gdi32\SelectObject", "ptr", mem, "ptr", bmp, "ptr")
+        brush := DllCall("gdi32\CreateSolidBrush", "uint", HeaderWinColor(Pal["SIDE"]), "ptr")
+        bounds := Buffer(16, 0)
+        NumPut("int", 0, "int", 0, "int", w, "int", h, bounds)
+        DllCall("user32\FillRect", "ptr", mem, "ptr", bounds, "ptr", brush)
+        DllCall("gdi32\DeleteObject", "ptr", brush)
+        brush := 0
+        if active || hovered {
+            brush := DllCall("gdi32\CreateSolidBrush", "uint", HeaderWinColor(Pal[active ? "NAVON" : "FIELD"]), "ptr")
+            rgn := DllCall("gdi32\CreateRoundRectRgn", "int", 1, "int", 1,
+                "int", 75, "int", 63, "int", 14, "int", 14, "ptr")
+            DllCall("gdi32\FillRgn", "ptr", mem, "ptr", rgn, "ptr", brush)
+            DllCall("gdi32\DeleteObject", "ptr", rgn)
+            rgn := 0
+            DllCall("gdi32\DeleteObject", "ptr", brush)
+            brush := 0
+            if hovered {
+                brush := DllCall("gdi32\CreateSolidBrush", "uint", HeaderWinColor(Pal["ACCENT_T"]), "ptr")
+                NumPut("int", 4, "int", 17, "int", 7, "int", 47, bounds)
+                DllCall("user32\FillRect", "ptr", mem, "ptr", bounds, "ptr", brush)
+                DllCall("gdi32\DeleteObject", "ptr", brush)
+                brush := 0
+            }
+        }
+        DllCall("gdi32\SetBkMode", "ptr", mem, "int", 1)
+        DllCall("gdi32\SetTextColor", "ptr", mem, "uint",
+            HeaderWinColor(Pal[active || hovered ? "ACCENT_T" : "MUTED"]))
+        font := DllCall("gdi32\CreateFontW", "int", -24, "int", 0, "int", 0, "int", 0,
+            "int", 400, "uint", 0, "uint", 0, "uint", 0, "uint", 1,
+            "uint", 0, "uint", 0, "uint", 0, "uint", 0, "str", "Segoe MDL2 Assets", "ptr")
+        if !font
+            throw Error("Cannot draw sidebar icon")
+        oldFont := DllCall("gdi32\SelectObject", "ptr", mem, "ptr", font, "ptr")
+        NumPut("int", 4, "int", 7, "int", 72, "int", 37, bounds)
+        DllCall("user32\DrawTextW", "ptr", mem, "wstr", Chr(glyph), "int", -1,
+            "ptr", bounds, "uint", 0x25)
+        DllCall("gdi32\SelectObject", "ptr", mem, "ptr", oldFont)
+        oldFont := 0
+        DllCall("gdi32\DeleteObject", "ptr", font)
+        font := 0
+        font := DllCall("gdi32\CreateFontW", "int", -11, "int", 0, "int", 0, "int", 0,
+            "int", 700, "uint", 0, "uint", 0, "uint", 0, "uint", 1,
+            "uint", 0, "uint", 0, "uint", 0, "uint", 0, "str", "Segoe UI", "ptr")
+        oldFont := DllCall("gdi32\SelectObject", "ptr", mem, "ptr", font, "ptr")
+        NumPut("int", 4, "int", 41, "int", 72, "int", 59, bounds)
+        DllCall("user32\DrawTextW", "ptr", mem, "wstr", label, "int", -1,
+            "ptr", bounds, "uint", 0x25)
+        success := true
+        return bmp
+    } finally {
+        if oldFont
+            DllCall("gdi32\SelectObject", "ptr", mem, "ptr", oldFont)
+        if font
+            DllCall("gdi32\DeleteObject", "ptr", font)
+        if brush
+            DllCall("gdi32\DeleteObject", "ptr", brush)
+        if rgn
+            DllCall("gdi32\DeleteObject", "ptr", rgn)
+        if oldBmp
+            DllCall("gdi32\SelectObject", "ptr", mem, "ptr", oldBmp)
+        if mem
+            DllCall("gdi32\DeleteDC", "ptr", mem)
+        DllCall("user32\ReleaseDC", "ptr", 0, "ptr", screen)
+        if !success && bmp
+            DllCall("gdi32\DeleteObject", "ptr", bmp)
     }
 }
 
 ShowPanel(name, *) {
-    global CurPage, panels, navItems, g, logBox, hkStart, hkStop, hkRecord
+    global CurPage, panels, navItems, g, logBox, hkStart, hkStop, hkRecord, PickingTarget
+    if name != "Settings" && PickingTarget
+        StopExePicker("Selection cancelled.")
     ; Text-based sidebar items do not take keyboard focus. Move focus away
     ; from the hotkey input if that panel is being hidden.
     if name != "Settings" && IsObject(g) {
@@ -501,6 +779,7 @@ ShowPanel(name, *) {
             ctrl.Visible := (pname = name)
     }
     PaintNavTiles()
+    UiUpdateHover()
     ; Repaint after switching pages; hover updates only toggle the affected tiles.
     DllCall("user32\RedrawWindow", "ptr", g.Hwnd, "ptr", 0, "ptr", 0, "uint", 0x85)
 }
@@ -560,12 +839,12 @@ LoadList(*) {
 }
 
 PersistSettings() {
-    global WinTitle, edWin, edLoops, edSpeed, edUp, edSell, ddl, chkTop, ActionHotkeys
+    global WinTitle, edWin, edLoops, edSpeed, ddl, chkTop, ActionHotkeys
     WinTitle := edWin.Value
     WriteSetting("loops", edLoops.Value)
     WriteSetting("speed", edSpeed.Value)
-    WriteSetting("upkey", edUp.Value)
-    WriteSetting("sellkey", edSell.Value)
+    ; Keep existing upkey/sellkey INI entries untouched so older presets
+    ; retain their original behaviour even without visible key editors.
     WriteSetting("window", WinTitle)
     WriteSetting("preset", ddl.Text)
     WriteSetting("ontop", chkTop.Value)
